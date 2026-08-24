@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Connect.Api/Connect.Api.csproj" />
+    <Project Path="src/Connect.Application/Connect.Application.csproj" />
+    <Project Path="src/Connect.Domain/Connect.Domain.csproj" />
+    <Project Path="src/Connect.Infrastructure/Connect.Infrastructure.csproj" />
+  </Folder>
+</Solution>

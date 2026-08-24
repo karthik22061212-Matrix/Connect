@@ -9,21 +9,21 @@ as they're completed — updating this file is part of finishing a task, not opt
 ---
 
 ## Prerequisites
-- [ ] Firebase project created, FCM enabled
-- [ ] Local tooling installed (.NET 8 SDK, Flutter SDK, Git)
-- [ ] Docs `00`–`07` committed to `docs/`
-- [ ] SQL Server LocalDB confirmed working
+- [x] Firebase project created, FCM enabled
+- [x] Local tooling installed (.NET 8 SDK, Flutter SDK, Git)
+- [x] Docs `00`–`07` committed to `docs/`
+- [x] SQL Server LocalDB confirmed working
 
 ## Sprint 0 — Local Scaffolding
-- [ ] `Connect.Domain` project created (empty, base entities/enums stubbed)
-- [ ] `Connect.Application` project created (MediatR, FluentValidation, AutoMapper registered)
-- [ ] `Connect.Infrastructure` project created (EF Core, LocalDB connection wired)
-- [ ] `Connect.Api` project created (Program.cs, appsettings.json, Swagger enabled)
-- [ ] Solution builds and runs locally (`dotnet run` succeeds, Swagger UI loads)
-- [ ] Flutter Web project created, runs locally (`flutter run -d chrome`)
-- [ ] Flutter project successfully calls a test "health check" endpoint on the API
-- [ ] Global exception handler middleware wired and tested
-- [ ] Initial EF Core migration created from `07-database-schema.md`, applied to LocalDB
+- [x] `Connect.Domain` project created (empty, base entities/enums stubbed)
+- [x] `Connect.Application` project created (MediatR, FluentValidation, AutoMapper registered)
+- [x] `Connect.Infrastructure` project created (EF Core, LocalDB connection wired)
+- [x] `Connect.Api` project created (Program.cs, appsettings.json, Swagger enabled)
+- [x] Solution builds and runs locally (`dotnet run` succeeds, Swagger UI loads)
+- [x] Flutter Web project created, runs locally (`flutter run -d chrome`)
+- [x] Flutter project successfully calls a test "health check" endpoint on the API
+- [x] Global exception handler middleware wired and tested
+- [x] Initial EF Core migration created from `07-database-schema.md`, applied to LocalDB
 
 ## Sprint 1 — Auth & Identity
 - [ ] `RegisterUser` command + handler + validator
@@ -93,4 +93,4 @@ as they're completed — updating this file is part of finishing a task, not opt
 ## Session Log
 *(Each Antigravity session should append one line here when it stops, noting where it left off.)*
 
-- Session 1: _not yet started_
+- Session 1: Completed Sprint 0 local scaffolding — created Connect.Domain, Connect.Application, Connect.Infrastructure, and Connect.Api projects, wired Serilog request logging and Global Exception Handler, created and applied InitialCreate EF Core migration to SQL Server LocalDB, scaffolded Flutter Web application, integrated health check endpoint, verified local build and Swagger UI. Sprint 0 complete.

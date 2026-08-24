@@ -1,0 +1,11 @@
+{
+    "name": "Connect - Real-time Calling App",
+    "short_name": "Connect",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#0F172A",
+    "theme_color": "#6366F1",
+    "description": "Real-time Voice Calling Application",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false
+}

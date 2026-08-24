@@ -1,0 +1,12 @@
+D:\Connect\backend\src\Connect.Domain\bin\Debug\net8.0\Connect.Domain.deps.json
+D:\Connect\backend\src\Connect.Domain\bin\Debug\net8.0\Connect.Domain.dll
+D:\Connect\backend\src\Connect.Domain\bin\Debug\net8.0\Connect.Domain.pdb
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.GeneratedMSBuildEditorConfig.editorconfig
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.AssemblyInfoInputs.cache
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.AssemblyInfo.cs
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.csproj.CoreCompileInputs.cache
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.sourcelink.json
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.dll
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\refint\Connect.Domain.dll
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\Connect.Domain.pdb
+D:\Connect\backend\src\Connect.Domain\obj\Debug\net8.0\ref\Connect.Domain.dll
