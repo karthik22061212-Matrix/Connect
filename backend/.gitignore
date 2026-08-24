@@ -1,0 +1,9 @@
+## Ignore Visual Studio / .NET build artifacts
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+.vscode/
