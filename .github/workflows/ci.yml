@@ -1,0 +1,53 @@
+name: Connect CI
+
+on:
+  push:
+    branches: [ main, master, dev, "feature/**" ]
+  pull_request:
+    branches: [ main, master, dev ]
+
+jobs:
+  build-and-test-backend:
+    name: Build & Test Backend (.NET 8)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore backend/Connect.slnx
+
+      - name: Build solution
+        run: dotnet build backend/Connect.slnx --no-restore --configuration Release
+
+      - name: Run unit tests
+        run: dotnet test backend/Connect.slnx --no-build --configuration Release --verbosity normal
+
+  analyze-frontend:
+    name: Analyze Frontend (Flutter)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          flutter pub get
+
+      - name: Analyze code
+        run: |
+          cd frontend
+          flutter analyze

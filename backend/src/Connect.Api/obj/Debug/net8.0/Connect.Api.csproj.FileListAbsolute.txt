@@ -178,3 +178,4 @@ D:\Connect\backend\src\Connect.Api\obj\Debug\net8.0\refint\Connect.Api.dll
 D:\Connect\backend\src\Connect.Api\obj\Debug\net8.0\Connect.Api.pdb
 D:\Connect\backend\src\Connect.Api\obj\Debug\net8.0\Connect.Api.genruntimeconfig.cache
 D:\Connect\backend\src\Connect.Api\obj\Debug\net8.0\ref\Connect.Api.dll
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\Microsoft.AspNetCore.Authentication.JwtBearer.dll

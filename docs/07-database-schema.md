@@ -134,6 +134,6 @@ public enum DevicePlatform { Web = 0, Android = 1, iOS = 2 }
 ## 4. Notes for Implementation
 - All tables inherit `Id`, `CreatedAt`, `UpdatedAt` from a shared `AuditableEntity` base class in `Connect.Domain.Common`.
 - Soft delete is only implemented on `User` (per the locked 60-day reactivation rule). Other entities (Call, ConnectRequest, etc.) belonging to a soft-deleted user are **not** deleted or hidden — they remain intact so the other party's history/records stay accurate; only the deleted user's own login/visibility is blocked.
-- Retention (call history 90 days, permanent purge after 60-day soft-delete window) is enforced by a background job — see `08-background-jobs.md`.
+- Retention (call history 90 days, permanent purge after 60-day soft-delete window) is enforced by background jobs — `CallHistoryPurgeBackgroundService` and `ExpiredAccountsPurgeBackgroundService`, implemented in Sprint 7 (see `04-sprint-plan.md` and `06-backend-architecture.md` Section 6).
 - `Connection.UserAId < UserBId` ordering must be enforced in the command handler (`SendConnectRequestCommandHandler` / accept logic), not just the DB constraint — compare GUIDs before insert.
 - EF Core configurations for each entity (Fluent API, not data annotations) live in `Connect.Infrastructure.Persistence.Configurations`, one file per entity, implementing `IEntityTypeConfiguration<T>`.

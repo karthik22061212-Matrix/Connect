@@ -1,6 +1,9 @@
+using System.Threading.RateLimiting;
 using Connect.Api.Middleware;
 using Connect.Application;
 using Connect.Infrastructure;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.OpenApi.Models;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,44 +23,78 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
+
+// Rate limiting setup for Auth endpoints
+builder.Services.AddRateLimiter(options =>
 {
-    c.SwaggerDoc("v1", new() { Title = "Connect API", Version = "v1" });
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter(policyName: "AuthRateLimit", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 10;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
 });
 
-// Configure CORS for Flutter Web local development
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Connect API v1",
+        Version = "v1",
+        Description = "REST API backend for Connect Web voice calling platform (Sprint 7.4 Hardened)."
+    });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// Configure CORS for explicit allowed origins (supporting SignalR credentials)
+var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
+    ?? new[] { "http://localhost:5200", "http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:5200" };
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("AllowedOriginsPolicy", policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
 var app = builder.Build();
 
-// 3. Configure HTTP request pipeline (Strict Middleware Pipeline Order per docs/06-backend-architecture.md)
-// Step 1: Global Exception Handler Middleware (must be first)
+// 3. Configure HTTP request pipeline (Strict Middleware Pipeline Order)
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
-
-// Step 2: Serilog request logging middleware
 app.UseSerilogRequestLogging();
-
-// Step 3: HTTPS redirection
 app.UseHttpsRedirection();
-
-// Step 4: CORS
-app.UseCors("AllowAll");
-
-// Step 5: Authentication
+app.UseCors("AllowedOriginsPolicy");
+app.UseRateLimiter();
 app.UseAuthentication();
-
-// Step 6: Authorization
 app.UseAuthorization();
 
-// Swagger UI (enabled for local dev)
 if (app.Environment.IsDevelopment() || true)
 {
     app.UseSwagger();
@@ -65,10 +102,11 @@ if (app.Environment.IsDevelopment() || true)
 }
 
 app.MapControllers();
+app.MapHub<Connect.Infrastructure.Realtime.CallHub>("/hubs/call");
 
 try
 {
-    Log.Information("Starting Connect API server...");
+    Log.Information("Starting Connect API v1 server...");
     app.Run();
 }
 catch (Exception ex)

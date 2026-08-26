@@ -1,0 +1,97 @@
+using Connect.Application.Common.Exceptions;
+using Connect.Application.Common.Interfaces;
+using Connect.Application.Features.ConnectRequests.Commands.SendConnectRequest;
+using Connect.Domain.Entities;
+using Connect.Domain.Enums;
+using Moq;
+
+namespace Connect.Application.UnitTests.ConnectRequests;
+
+public class SendConnectRequestCommandHandlerTests
+{
+    private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
+    private readonly Mock<IRepository<User>> _userRepoMock = new();
+    private readonly Mock<IRepository<ConnectRequest>> _requestRepoMock = new();
+    private readonly Mock<IRepository<Connection>> _connectionRepoMock = new();
+    private readonly Mock<IRepository<Block>> _blockRepoMock = new();
+    private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
+    private readonly Mock<IDateTimeProvider> _dateTimeProviderMock = new();
+    private readonly SendConnectRequestCommandHandler _handler;
+
+    private readonly Guid _currentUserId = Guid.NewGuid();
+    private readonly Guid _targetUserId = Guid.NewGuid();
+
+    public SendConnectRequestCommandHandlerTests()
+    {
+        _unitOfWorkMock.Setup(u => u.Users).Returns(_userRepoMock.Object);
+        _unitOfWorkMock.Setup(u => u.ConnectRequests).Returns(_requestRepoMock.Object);
+        _unitOfWorkMock.Setup(u => u.Connections).Returns(_connectionRepoMock.Object);
+        _unitOfWorkMock.Setup(u => u.Blocks).Returns(_blockRepoMock.Object);
+
+        _currentUserServiceMock.Setup(c => c.UserId).Returns(_currentUserId);
+        _dateTimeProviderMock.Setup(d => d.UtcNow).Returns(DateTime.UtcNow);
+
+        _handler = new SendConnectRequestCommandHandler(
+            _unitOfWorkMock.Object,
+            _currentUserServiceMock.Object,
+            _dateTimeProviderMock.Object);
+    }
+
+    [Fact]
+    public async Task Handle_ValidRequest_CreatesConnectRequest()
+    {
+        // Arrange
+        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<User> { new User { Id = _targetUserId, UserId = "target_user" } });
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
+        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Connection>());
+        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ConnectRequest>());
+
+        var command = new SendConnectRequestCommand(_targetUserId);
+
+        // Act
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(_currentUserId, result.FromUserId);
+        Assert.Equal(_targetUserId, result.ToUserId);
+        Assert.Equal(ConnectRequestStatus.Pending, result.Status);
+
+        _requestRepoMock.Verify(r => r.Add(It.IsAny<ConnectRequest>()), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_SendToSelf_ThrowsConflictException()
+    {
+        // Arrange
+        var command = new SendConnectRequestCommand(_currentUserId);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ConflictException>(() => _handler.Handle(command, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Handle_AlreadyConnected_ThrowsConflictException()
+    {
+        // Arrange
+        var userAId = _currentUserId.CompareTo(_targetUserId) < 0 ? _currentUserId : _targetUserId;
+        var userBId = _currentUserId.CompareTo(_targetUserId) < 0 ? _targetUserId : _currentUserId;
+
+        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<User> { new User { Id = _targetUserId, UserId = "target_user" } });
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
+        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Connection> { new Connection { UserAId = userAId, UserBId = userBId } });
+
+        var command = new SendConnectRequestCommand(_targetUserId);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ConflictException>(() => _handler.Handle(command, CancellationToken.None));
+    }
+}
