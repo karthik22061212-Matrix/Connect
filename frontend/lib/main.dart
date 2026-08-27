@@ -1,5 +1,8 @@
+// ignore_for_file: deprecated_member_use, unused_element
+
 import 'dart:async';
 import 'dart:convert';
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:signalr_netcore/signalr_client.dart';
@@ -149,27 +152,47 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   bool _isSearching = false;
 
   List<dynamic> _pendingRequests = [];
+  List<dynamic> _sentRequests = [];
   List<dynamic> _connections = [];
   List<dynamic> _blockedUsers = [];
   List<dynamic> _callHistory = [];
 
-  final TextEditingController _handleCheckController = TextEditingController();
+  final FocusNode _loginEmailFocusNode = FocusNode();
+  final FocusNode _loginPasswordFocusNode = FocusNode();
+
+  final FocusNode _regHandleFocusNode = FocusNode();
+  final FocusNode _regEmailFocusNode = FocusNode();
+  final FocusNode _regPasswordFocusNode = FocusNode();
+  final FocusNode _regConfirmPasswordFocusNode = FocusNode();
+
+  String? _loginEmailError;
+  String? _loginPasswordError;
+
+  String? _regHandleError;
+  String? _regEmailError;
+  String? _regPasswordError;
+  String? _regConfirmPasswordError;
+
   String? _handleCheckResult;
   bool? _isHandleAvailable;
-  bool _isCheckingHandle = false;
 
-  final TextEditingController _regEmailController = TextEditingController(text: 'user1@connect.com');
-  final TextEditingController _regPasswordController = TextEditingController(text: 'Password123!');
-  final TextEditingController _regHandleController = TextEditingController(text: 'user_one');
-  final TextEditingController _regPhoneController = TextEditingController(text: '1112223333');
+  final TextEditingController _regEmailController = TextEditingController();
+  final TextEditingController _regPasswordController = TextEditingController();
+  final TextEditingController _regConfirmPasswordController = TextEditingController();
+  final TextEditingController _regHandleController = TextEditingController();
+  final TextEditingController _regPhoneController = TextEditingController();
 
-  final TextEditingController _loginEmailController = TextEditingController(text: 'user1@connect.com');
-  final TextEditingController _loginPasswordController = TextEditingController(text: 'Password123!');
+  final TextEditingController _loginEmailController = TextEditingController();
+  final TextEditingController _loginPasswordController = TextEditingController();
 
   bool _isAuthModeLogin = true;
   String? _authErrorMessage;
   String? _authSuccessMessage;
   bool _isAuthLoading = false;
+
+  bool _obscureLoginPassword = true;
+  bool _obscureRegPassword = true;
+  bool _obscureRegConfirmPassword = true;
 
   String _callStatusText = '';
   String? _activeCallId;
@@ -195,9 +218,158 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
   }
 
+  // --- LocalStorage Session Persistence Helpers ---
+  void _saveSessionToLocalStorage(UserSession session) {
+    try {
+      html.window.localStorage['connect_token'] = session.token;
+      html.window.localStorage['connect_id'] = session.id;
+      html.window.localStorage['connect_email'] = session.email;
+      html.window.localStorage['connect_handle'] = session.handle;
+    } catch (e) {
+      _log('Error saving session to localStorage: $e');
+    }
+  }
+
+  void _loadSessionFromLocalStorage() {
+    try {
+      final token = html.window.localStorage['connect_token'];
+      final id = html.window.localStorage['connect_id'];
+      final email = html.window.localStorage['connect_email'];
+      final handle = html.window.localStorage['connect_handle'];
+
+      if (token != null && token.isNotEmpty && handle != null && handle.isNotEmpty) {
+        final restoredSession = UserSession(
+          token: token,
+          id: id ?? '',
+          email: email ?? '',
+          handle: handle,
+        );
+        setState(() {
+          _user1Session = restoredSession;
+          _activeSessionIndex = 1;
+        });
+        _log('Restored session for @$handle from localStorage');
+        _connectSignalR();
+        _refreshActiveTabData();
+      }
+    } catch (e) {
+      _log('Error loading session from localStorage: $e');
+    }
+  }
+
+  void _clearSessionFromLocalStorage() {
+    try {
+      html.window.localStorage.remove('connect_token');
+      html.window.localStorage.remove('connect_id');
+      html.window.localStorage.remove('connect_email');
+      html.window.localStorage.remove('connect_handle');
+    } catch (e) {
+      _log('Error clearing session from localStorage: $e');
+    }
+  }
+
+  void _handle401() {
+    _clearSessionFromLocalStorage();
+    _hubConnection?.stop();
+    setState(() {
+      _user1Session = null;
+      _user2Session = null;
+      _isHubConnected = false;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Session expired or unauthorized. Please log in again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _logout() {
+    _clearSessionFromLocalStorage();
+    _hubConnection?.stop();
+    setState(() {
+      if (_activeSessionIndex == 1) {
+        _user1Session = null;
+      } else {
+        _user2Session = null;
+      }
+      _isHubConnected = false;
+    });
+    _log('Logged out and cleared localStorage session');
+  }
+
   @override
   void initState() {
     super.initState();
+
+    _loadSessionFromLocalStorage();
+
+    _loginEmailFocusNode.addListener(() {
+      if (!_loginEmailFocusNode.hasFocus) {
+        setState(() {
+          _loginEmailError = _validateLoginEmailOrUserId(_loginEmailController.text);
+        });
+      }
+    });
+
+    _loginPasswordFocusNode.addListener(() {
+      if (!_loginPasswordFocusNode.hasFocus) {
+        setState(() {
+          _loginPasswordError = _validateLoginPassword(_loginPasswordController.text);
+        });
+      }
+    });
+
+    _regHandleFocusNode.addListener(() {
+      if (!_regHandleFocusNode.hasFocus) {
+        setState(() {
+          _regHandleError = _validateRegUserId(_regHandleController.text);
+        });
+        if (_regHandleController.text.trim().isNotEmpty) {
+          _checkHandleAvailability();
+        } else {
+          setState(() {
+            _handleCheckResult = null;
+            _isHandleAvailable = null;
+          });
+        }
+      }
+    });
+
+    _regHandleController.addListener(() {
+      if (_handleCheckResult != null) {
+        setState(() {
+          _handleCheckResult = null;
+          _isHandleAvailable = null;
+        });
+      }
+    });
+
+    _regEmailFocusNode.addListener(() {
+      if (!_regEmailFocusNode.hasFocus) {
+        setState(() {
+          _regEmailError = _validateRegEmail(_regEmailController.text);
+        });
+      }
+    });
+
+    _regPasswordFocusNode.addListener(() {
+      if (!_regPasswordFocusNode.hasFocus) {
+        setState(() {
+          _regPasswordError = _validateRegPassword(_regPasswordController.text);
+        });
+      }
+    });
+
+    _regConfirmPasswordFocusNode.addListener(() {
+      if (!_regConfirmPasswordFocusNode.hasFocus) {
+        setState(() {
+          _regConfirmPasswordError = _validateRegConfirmPassword(_regConfirmPasswordController.text);
+        });
+      }
+    });
   }
 
   @override
@@ -206,16 +378,107 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     _callTimer?.cancel();
     _ringTimer?.cancel();
     _searchQueryController.dispose();
-    _handleCheckController.dispose();
     _regEmailController.dispose();
     _regPasswordController.dispose();
+    _regConfirmPasswordController.dispose();
     _regHandleController.dispose();
     _regPhoneController.dispose();
     _loginEmailController.dispose();
     _loginPasswordController.dispose();
+    _loginEmailFocusNode.dispose();
+    _loginPasswordFocusNode.dispose();
+    _regHandleFocusNode.dispose();
+    _regEmailFocusNode.dispose();
+    _regPasswordFocusNode.dispose();
+    _regConfirmPasswordFocusNode.dispose();
     _reportReasonController.dispose();
     _reportNoteController.dispose();
     super.dispose();
+  }
+
+  void _clearAuthErrorsAndFields() {
+    setState(() {
+      _authErrorMessage = null;
+      _authSuccessMessage = null;
+      _loginEmailError = null;
+      _loginPasswordError = null;
+      _regHandleError = null;
+      _regEmailError = null;
+      _regPasswordError = null;
+      _regConfirmPasswordError = null;
+      _loginEmailController.clear();
+      _loginPasswordController.clear();
+      _regHandleController.clear();
+      _regEmailController.clear();
+      _regPasswordController.clear();
+      _regConfirmPasswordController.clear();
+      _regPhoneController.clear();
+      _handleCheckResult = null;
+      _isHandleAvailable = null;
+      _obscureLoginPassword = true;
+      _obscureRegPassword = true;
+      _obscureRegConfirmPassword = true;
+    });
+  }
+
+  String? _validateLoginEmailOrUserId(String? value) {
+    final input = value?.trim() ?? '';
+    if (input.isEmpty) {
+      return 'Please enter your email or user ID.';
+    }
+    if (input.contains('@')) {
+      final emailRegExp = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+      if (!emailRegExp.hasMatch(input)) {
+        return "That doesn't look like a valid email address.";
+      }
+    }
+    return null;
+  }
+
+  String? _validateLoginPassword(String? value) {
+    final input = value ?? '';
+    if (input.isEmpty) {
+      return 'Please enter your password.';
+    }
+    return null;
+  }
+
+  String? _validateRegUserId(String? value) {
+    final input = value?.trim() ?? '';
+    if (input.isEmpty) {
+      return 'Please choose a user ID.';
+    }
+    return null;
+  }
+
+  String? _validateRegEmail(String? value) {
+    final input = value?.trim() ?? '';
+    if (input.isEmpty) {
+      return 'Please enter your email address.';
+    }
+    final emailRegExp = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+    if (!emailRegExp.hasMatch(input)) {
+      return "That doesn't look like a valid email address.";
+    }
+    return null;
+  }
+
+  String? _validateRegPassword(String? value) {
+    final input = value ?? '';
+    if (input.isEmpty) {
+      return 'Please enter your password.';
+    }
+    if (input.length < 8) {
+      return 'Password must be at least 8 characters.';
+    }
+    return null;
+  }
+
+  String? _validateRegConfirmPassword(String? value) {
+    if (value != _regPasswordController.text) {
+      return "Passwords don't match.";
+    }
+    return null;
   }
 
   Future<void> _connectSignalR() async {
@@ -377,43 +640,30 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Future<void> _checkHandleAvailability() async {
-    final value = _handleCheckController.text.trim().isNotEmpty
-        ? _handleCheckController.text.trim()
-        : _regHandleController.text.trim();
+    final value = _regHandleController.text.trim();
     if (value.isEmpty) {
       setState(() {
-        _handleCheckResult = 'Please enter a handle to check';
-        _isHandleAvailable = false;
+        _handleCheckResult = null;
+        _isHandleAvailable = null;
       });
       return;
     }
 
-    setState(() {
-      _isCheckingHandle = true;
-      _handleCheckResult = null;
-    });
-
     try {
       final res = await http.get(Uri.parse('$_baseUrl/api/v1/users/check-userid?value=$value'));
       final data = jsonDecode(res.body);
-      final bool isAvail = data['isAvailable'] == true;
+      final bool isAvail = (data['isAvailable'] == true || data['IsAvailable'] == true);
       setState(() {
         _isHandleAvailable = isAvail;
-        _handleCheckResult = isAvail
-            ? '@$value is available!'
-            : (data['message'] ?? 'Handle @$value is taken');
+        _handleCheckResult = isAvail ? '✓ Available' : '✗ Already taken';
       });
       _log('Check Handle ($value): ${res.body}');
     } catch (e) {
       setState(() {
         _isHandleAvailable = false;
-        _handleCheckResult = 'Could not verify handle availability';
+        _handleCheckResult = 'Could not verify availability';
       });
       _log('Check Handle Exception: $e');
-    } finally {
-      setState(() {
-        _isCheckingHandle = false;
-      });
     }
   }
 
@@ -421,6 +671,25 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     setState(() {
       _authErrorMessage = null;
       _authSuccessMessage = null;
+    });
+
+    final handleErr = _validateRegUserId(_regHandleController.text);
+    final emailErr = _validateRegEmail(_regEmailController.text);
+    final passErr = _validateRegPassword(_regPasswordController.text);
+    final confirmPassErr = _validateRegConfirmPassword(_regConfirmPasswordController.text);
+
+    setState(() {
+      _regHandleError = handleErr;
+      _regEmailError = emailErr;
+      _regPasswordError = passErr;
+      _regConfirmPasswordError = confirmPassErr;
+    });
+
+    if (handleErr != null || emailErr != null || passErr != null || confirmPassErr != null) {
+      return;
+    }
+
+    setState(() {
       _isAuthLoading = true;
     });
 
@@ -430,14 +699,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       'password': _regPasswordController.text.trim(),
       'phoneNumber': _regPhoneController.text.trim(),
     };
-
-    if (body['userId']!.isEmpty || body['email']!.isEmpty || body['password']!.isEmpty) {
-      setState(() {
-        _authErrorMessage = 'Please fill in all required fields (Handle, Email, Password)';
-        _isAuthLoading = false;
-      });
-      return;
-    }
 
     try {
       final res = await http.post(
@@ -451,6 +712,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final session = UserSession.fromJson(data);
+        _saveSessionToLocalStorage(session);
         setState(() {
           if (sessionSlot == 1) {
             _user1Session = session;
@@ -463,10 +725,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         await _connectSignalR();
         _refreshActiveTabData();
       } else {
-        final data = jsonDecode(res.body);
-        final msg = data['message'] ?? data['title'] ?? 'Registration failed (${res.statusCode})';
+        String msg = 'Registration failed. Please try again.';
+        try {
+          final data = jsonDecode(res.body);
+          final detail = data['detail']?.toString() ?? data['message']?.toString() ?? data['title']?.toString();
+          if (detail != null && detail.isNotEmpty && detail != 'Unauthorized' && detail != 'Bad Request') {
+            msg = detail;
+          }
+        } catch (_) {}
         setState(() {
-          _authErrorMessage = msg.toString();
+          _authErrorMessage = msg;
         });
       }
     } catch (e) {
@@ -485,6 +753,21 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     setState(() {
       _authErrorMessage = null;
       _authSuccessMessage = null;
+    });
+
+    final emailErr = _validateLoginEmailOrUserId(_loginEmailController.text);
+    final passErr = _validateLoginPassword(_loginPasswordController.text);
+
+    setState(() {
+      _loginEmailError = emailErr;
+      _loginPasswordError = passErr;
+    });
+
+    if (emailErr != null || passErr != null) {
+      return;
+    }
+
+    setState(() {
       _isAuthLoading = true;
     });
 
@@ -492,14 +775,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       'emailOrUserId': _loginEmailController.text.trim(),
       'password': _loginPasswordController.text.trim(),
     };
-
-    if (body['emailOrUserId']!.isEmpty || body['password']!.isEmpty) {
-      setState(() {
-        _authErrorMessage = 'Please enter your email/handle and password';
-        _isAuthLoading = false;
-      });
-      return;
-    }
 
     try {
       final res = await http.post(
@@ -513,6 +788,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final session = UserSession.fromJson(data);
+        _saveSessionToLocalStorage(session);
         setState(() {
           if (sessionSlot == 1) {
             _user1Session = session;
@@ -525,10 +801,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         await _connectSignalR();
         _refreshActiveTabData();
       } else {
-        final data = jsonDecode(res.body);
-        final msg = data['message'] ?? data['title'] ?? 'Invalid credentials (${res.statusCode})';
+        final input = _loginEmailController.text.trim();
+        final isEmail = input.contains('@');
         setState(() {
-          _authErrorMessage = msg.toString();
+          _authErrorMessage = isEmail
+              ? "Email and password don't match."
+              : "User ID and password don't match.";
         });
       }
     } catch (e) {
@@ -561,6 +839,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Search Users "$q" -> Status ${res.statusCode}: ${res.body}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
 
       if (res.statusCode == 200) {
         setState(() {
@@ -580,7 +862,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<void> _sendConnectRequest(String targetGuidId) async {
+  Future<void> _sendConnectRequest(String targetGuidId, String targetHandle) async {
     final session = currentSession;
     if (session == null) return;
 
@@ -595,11 +877,29 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Send Connect Request -> Status ${res.statusCode}: ${res.body}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        setState(() {
+          final exists = _sentRequests.any((r) => r['toUserId'] == targetGuidId);
+          if (!exists) {
+            _sentRequests.add({
+              'toUserId': targetGuidId,
+              'targetHandle': targetHandle,
+              'createdAt': DateTime.now().toIso8601String(),
+            });
+          }
+        });
+      }
+
       _fetchPendingRequests();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res.statusCode == 200 ? 'Connect request sent!' : 'Request sent or pending'),
+            content: Text(res.statusCode == 200 || res.statusCode == 201 ? 'Connect request sent!' : 'Request sent or pending'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -618,6 +918,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         Uri.parse('$_baseUrl/api/v1/connect-requests/pending'),
         headers: {'Authorization': 'Bearer ${session.token}'},
       );
+
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
 
       if (res.statusCode == 200) {
         setState(() {
@@ -640,6 +945,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Accept Request $requestId -> Status ${res.statusCode}: ${res.body}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
       _fetchPendingRequests();
       _fetchConnections();
       if (mounted) {
@@ -661,6 +971,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         Uri.parse('$_baseUrl/api/v1/connections'),
         headers: {'Authorization': 'Bearer ${session.token}'},
       );
+
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
 
       if (res.statusCode == 200) {
         setState(() {
@@ -736,6 +1051,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           headers: {'Authorization': 'Bearer ${session.token}'},
         );
         _log('REST EndCall -> Status ${res.statusCode}: ${res.body}');
+        if (res.statusCode == 401) {
+          _handle401();
+          return;
+        }
       } catch (e) {
         _log('REST EndCall Exception: $e');
       }
@@ -770,6 +1089,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         headers: {'Authorization': 'Bearer ${session.token}'},
       );
 
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -792,6 +1116,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Block User $targetGuidId -> Status ${res.statusCode}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
       _fetchBlockedUsers();
       _fetchConnections();
       if (mounted) {
@@ -815,6 +1144,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Unblock User $targetGuidId -> Status ${res.statusCode}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
       _fetchBlockedUsers();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -835,6 +1169,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         Uri.parse('$_baseUrl/api/v1/users/blocked'),
         headers: {'Authorization': 'Bearer ${session.token}'},
       );
+
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
 
       if (res.statusCode == 200) {
         setState(() {
@@ -867,6 +1206,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Report User $reportedGuidId -> Status ${res.statusCode}: ${res.body}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
       _reportReasonController.clear();
       _reportNoteController.clear();
       if (mounted) {
@@ -890,15 +1234,14 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       );
 
       _log('Soft Delete Account -> Status ${res.statusCode}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
       if (res.statusCode == 204 || res.statusCode == 200) {
         _log('Account soft-deleted. Log in again within 60 days to reactivate.');
-        setState(() {
-          if (_activeSessionIndex == 1) {
-            _user1Session = null;
-          } else {
-            _user2Session = null;
-          }
-        });
+        _logout();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -936,6 +1279,117 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
+  void _showProfilePanelModal() {
+    final session = currentSession;
+    if (session == null) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Container(
+          width: 360,
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 44,
+                backgroundColor: const Color(0xFF0D9488),
+                child: Text(
+                  session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                  style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '@${session.handle}',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                session.email.isNotEmpty ? session.email : 'No email address',
+                style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showReportUserDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Report a User', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Select a contact to report and provide details below.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+              const SizedBox(height: 16),
+              if (_connections.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  decoration: const InputDecoration(labelText: 'Select Contact'),
+                  items: _connections.map<DropdownMenuItem<String>>((c) {
+                    return DropdownMenuItem<String>(
+                      value: c['connectedUserId'],
+                      child: Text('@${c['userId'] ?? c['connectedUserId']}'),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      _reportUser(val);
+                    }
+                  },
+                )
+              else
+                const Text('No connections available to report.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _reportReasonController,
+                decoration: const InputDecoration(labelText: 'Reason (e.g. Spam, Harassment)'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _reportNoteController,
+                decoration: const InputDecoration(labelText: 'Details / Note'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              if (_connections.isNotEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Report submitted cleanly.'), behavior: SnackBarBehavior.floating),
+                );
+              }
+            },
+            child: const Text('Submit Report'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = currentSession;
@@ -965,68 +1419,73 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: const BoxDecoration(
-                color: Color(0xFF0D9488),
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        title: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _showProfilePanelModal,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  '@${session.handle}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF0D9488),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
-                Row(
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
                     Text(
-                      _isHubConnected ? 'Connected' : 'Offline',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      '@${session.handle}',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _isHubConnected ? 'Connected' : 'Offline',
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                        ),
+                      ],
                     ),
                   ],
-                )
+                ),
               ],
             ),
-          ],
+          ),
         ),
         actions: [
           IconButton(
-            icon: Icon(_showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined),
-            tooltip: 'Developer Console & Test Harness',
+            icon: Icon(
+              _showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined,
+              size: 18,
+              color: const Color(0xFF94A3B8),
+            ),
+            tooltip: 'Developer Tools',
             onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Color(0xFF64748B)),
             tooltip: 'Log Out',
-            onPressed: () {
-              setState(() {
-                if (_activeSessionIndex == 1) {
-                  _user1Session = null;
-                } else {
-                  _user2Session = null;
-                }
-              });
-            },
+            onPressed: _logout,
           ),
           const SizedBox(width: 8),
         ],
@@ -1180,8 +1639,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               Container(
                 width: 44,
                 height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0D9488).withOpacity(0.12),
+                decoration: const BoxDecoration(
+                  color: Color(0x1F0D9488),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.forum_rounded, color: Color(0xFF0D9488), size: 26),
@@ -1200,7 +1659,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Simple, secure voice signaling and contact connections',
+            'Simple, secure voice calls and connections',
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
           ),
@@ -1217,8 +1676,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   child: GestureDetector(
                     onTap: () => setState(() {
                       _isAuthModeLogin = true;
-                      _authErrorMessage = null;
-                      _authSuccessMessage = null;
+                      _clearAuthErrorsAndFields();
                     }),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -1244,8 +1702,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   child: GestureDetector(
                     onTap: () => setState(() {
                       _isAuthModeLogin = false;
-                      _authErrorMessage = null;
-                      _authSuccessMessage = null;
+                      _clearAuthErrorsAndFields();
                     }),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -1318,18 +1775,33 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           if (_isAuthModeLogin) ...[
             TextField(
               controller: _loginEmailController,
-              decoration: const InputDecoration(
+              focusNode: _loginEmailFocusNode,
+              decoration: InputDecoration(
                 labelText: 'Email or User ID',
-                prefixIcon: Icon(Icons.person_outline, size: 20),
+                prefixIcon: const Icon(Icons.person_outline, size: 20),
+                errorText: _loginEmailError,
               ),
             ),
             const SizedBox(height: 14),
             TextField(
               controller: _loginPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(
+              focusNode: _loginPasswordFocusNode,
+              obscureText: _obscureLoginPassword,
+              decoration: InputDecoration(
                 labelText: 'Password',
-                prefixIcon: Icon(Icons.lock_outline, size: 20),
+                prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureLoginPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureLoginPassword = !_obscureLoginPassword;
+                    });
+                  },
+                ),
+                errorText: _loginPasswordError,
               ),
             ),
             const SizedBox(height: 20),
@@ -1337,29 +1809,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               onPressed: _isAuthLoading ? null : () => _loginUser(_activeSessionIndex),
               child: _isAuthLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  // : Text('Log In into User Slot $_activeSessionIndex'),
-                  : Text('Log In'),
+                  : const Text('Log In'),
             ),
           ] else ...[
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _regHandleController,
-                    decoration: const InputDecoration(
-                      labelText: 'User ID Handle (@handle)',
-                      prefixIcon: Icon(Icons.alternate_email, size: 20),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _isCheckingHandle ? null : _checkHandleAvailability,
-                  child: _isCheckingHandle
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Check'),
-                ),
-              ],
+            TextField(
+              controller: _regHandleController,
+              focusNode: _regHandleFocusNode,
+              decoration: InputDecoration(
+                labelText: 'User ID',
+                prefixIcon: const Icon(Icons.person_outline, size: 20),
+                errorText: _regHandleError,
+              ),
             ),
             if (_handleCheckResult != null)
               Padding(
@@ -1376,25 +1836,62 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             const SizedBox(height: 12),
             TextField(
               controller: _regEmailController,
-              decoration: const InputDecoration(
+              focusNode: _regEmailFocusNode,
+              decoration: InputDecoration(
                 labelText: 'Email Address',
-                prefixIcon: Icon(Icons.email_outlined, size: 20),
+                prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                errorText: _regEmailError,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _regPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(
+              focusNode: _regPasswordFocusNode,
+              obscureText: _obscureRegPassword,
+              decoration: InputDecoration(
                 labelText: 'Password',
-                prefixIcon: Icon(Icons.lock_outline, size: 20),
+                prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureRegPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureRegPassword = !_obscureRegPassword;
+                    });
+                  },
+                ),
+                errorText: _regPasswordError,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _regConfirmPasswordController,
+              focusNode: _regConfirmPasswordFocusNode,
+              obscureText: _obscureRegConfirmPassword,
+              decoration: InputDecoration(
+                labelText: 'Confirm Password',
+                prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureRegConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureRegConfirmPassword = !_obscureRegConfirmPassword;
+                    });
+                  },
+                ),
+                errorText: _regConfirmPasswordError,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _regPhoneController,
               decoration: const InputDecoration(
-                labelText: 'Phone Number',
+                labelText: 'Phone Number (Optional)',
                 prefixIcon: Icon(Icons.phone_outlined, size: 20),
               ),
             ),
@@ -1403,7 +1900,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               onPressed: _isAuthLoading ? null : () => _registerUser(_activeSessionIndex),
               child: _isAuthLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Text('Create Account in Slot $_activeSessionIndex'),
+                  : const Text('Create Account'),
             ),
           ],
         ],
@@ -1417,9 +1914,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Search & Connect', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+          const Text('Contacts', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
           const SizedBox(height: 4),
-          const Text('Find contacts by handle or phone number', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+          const Text('Search and connect with friends or view existing connections', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -1478,7 +1975,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                           ),
                         ),
                         ElevatedButton.icon(
-                          onPressed: () => _sendConnectRequest(guidId),
+                          onPressed: () => _sendConnectRequest(guidId, handle),
                           icon: const Icon(Icons.person_add_alt_1, size: 18),
                           label: const Text('Connect'),
                           style: ElevatedButton.styleFrom(
@@ -1493,6 +1990,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               },
             ),
             const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
           ],
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1560,26 +2059,18 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                       ],
                     ),
                     title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('Status: $presence', style: TextStyle(color: isOnline ? const Color(0xFF059669) : const Color(0xFF64748B), fontSize: 12)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () => _initiateCall(targetGuidId, handle),
-                          icon: const Icon(Icons.phone, size: 16),
-                          label: const Text('Call'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            textStyle: const TextStyle(fontSize: 13),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        IconButton(
-                          icon: const Icon(Icons.block, color: Color(0xFFE11D48), size: 20),
-                          tooltip: 'Block user',
-                          onPressed: () => _blockUser(targetGuidId),
-                        ),
-                      ],
+                    subtitle: Text(
+                      'Status: $presence',
+                      style: TextStyle(color: isOnline ? const Color(0xFF059669) : const Color(0xFF64748B), fontSize: 12),
+                    ),
+                    trailing: ElevatedButton.icon(
+                      onPressed: () => _initiateCall(targetGuidId, handle),
+                      icon: const Icon(Icons.phone, size: 16),
+                      label: const Text('Call'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
                     ),
                   ),
                 );
@@ -1604,7 +2095,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 children: const [
                   Text('Connect Requests', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                   SizedBox(height: 4),
-                  Text('Incoming connection requests from other users', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                  Text('Manage incoming and outgoing connection requests', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                 ],
               ),
               IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchPendingRequests),
@@ -1612,69 +2103,149 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 20),
           Expanded(
-            child: _pendingRequests.isEmpty
-                ? Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(40),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.inbox_outlined, size: 56, color: Color(0xFFCBD5E1)),
-                        SizedBox(height: 16),
-                        Text('No pending requests', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF475569))),
-                        SizedBox(height: 6),
-                        Text('When users send you connect requests, they will appear here.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13), textAlign: TextAlign.center),
-                      ],
-                    ),
-                  )
-                : ListView.separated(
-                    itemCount: _pendingRequests.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final req = _pendingRequests[index];
-                      final reqId = req['requestId'];
-                      final senderHandle = req['senderUserId'] ?? 'Unknown';
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Received Requests', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+                  const SizedBox(height: 12),
+                  if (_pendingRequests.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(32),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.inbox_outlined, size: 48, color: Color(0xFFCBD5E1)),
+                          SizedBox(height: 12),
+                          Text('No pending requests', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF475569))),
+                          SizedBox(height: 4),
+                          Text('When users send you connect requests, they will appear here.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12), textAlign: TextAlign.center),
+                        ],
+                      ),
+                    )
+                  else
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _pendingRequests.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final req = _pendingRequests[index];
+                        final reqId = req['requestId'];
+                        final senderHandle = req['senderUserId'] ?? 'Unknown';
 
-                      return Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                backgroundColor: const Color(0xFFFEF3C7),
-                                foregroundColor: const Color(0xFFD97706),
-                                child: Text(senderHandle.isNotEmpty ? senderHandle[0].toUpperCase() : 'R'),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('@$senderHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                    const SizedBox(height: 2),
-                                    Text('Wants to connect with you', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                                  ],
+                        return Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: const Color(0xFFFEF3C7),
+                                  foregroundColor: const Color(0xFFD97706),
+                                  child: Text(senderHandle.isNotEmpty ? senderHandle[0].toUpperCase() : 'R'),
                                 ),
-                              ),
-                              ElevatedButton(
-                                onPressed: () => _acceptConnectRequest(reqId),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0D9488),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('@$senderHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      const SizedBox(height: 2),
+                                      Text('Wants to connect with you', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                    ],
+                                  ),
                                 ),
-                                child: const Text('Accept'),
-                              ),
-                            ],
+                                ElevatedButton(
+                                  onPressed: () => _acceptConnectRequest(reqId),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0D9488),
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  ),
+                                  child: const Text('Accept'),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
+                        );
+                      },
+                    ),
+                  const SizedBox(height: 28),
+                  const Text('Sent Requests', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+                  const SizedBox(height: 12),
+                  if (_sentRequests.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(32),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.outbox_outlined, size: 48, color: Color(0xFFCBD5E1)),
+                          SizedBox(height: 12),
+                          Text('No sent requests', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF475569))),
+                          SizedBox(height: 4),
+                          Text('Connect requests you send to other users will be tracked here.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12), textAlign: TextAlign.center),
+                        ],
+                      ),
+                    )
+                  else
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _sentRequests.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final req = _sentRequests[index];
+                        final targetHandle = req['targetHandle'] ?? 'User';
+
+                        return Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: const Color(0xFFEFF6FF),
+                                  foregroundColor: const Color(0xFF2563EB),
+                                  child: Text(targetHandle.isNotEmpty ? targetHandle[0].toUpperCase() : 'S'),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('@$targetHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      const SizedBox(height: 2),
+                                      const Text('Request sent', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF1F5F9),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Text('Pending', style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -1695,53 +2266,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 children: const [
                   Text('Voice Calling', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                   SizedBox(height: 4),
-                  Text('SignalR real-time call state and active connections', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                  Text('Quick call dialing for your connected contacts', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                 ],
-              ),
-              OutlinedButton.icon(
-                onPressed: _connectSignalR,
-                icon: const Icon(Icons.sync, size: 18),
-                label: const Text('Reconnect SignalR'),
               ),
             ],
           ),
           const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  _isHubConnected ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                  color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFE11D48),
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _isHubConnected ? 'SignalR Hub Active' : 'SignalR Disconnected',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                      ),
-                      Text(
-                        _isHubConnected
-                            ? 'Ready for incoming & outgoing call signals'
-                            : 'Click reconnect to restore call listener',
-                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
           const Text('Quick Call Dialing', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
           const SizedBox(height: 12),
           if (_connections.isEmpty)
@@ -1857,7 +2387,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   Widget _buildFullCallOverlay() {
     return Container(
-      color: const Color(0xFF0F172A).withOpacity(0.96),
+      color: const Color(0xF50F172A),
       padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1867,7 +2397,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: const Color(0xFF0D9488).withOpacity(0.2),
+              color: const Color(0x330D9488),
               border: Border.all(color: const Color(0xFF0D9488), width: 3),
             ),
             child: Center(
@@ -1901,7 +2431,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               style: const TextStyle(fontSize: 14, color: Colors.amberAccent),
             ),
           const SizedBox(height: 40),
-          // Audio controls visually disabled/inert as requested for Sprint 7.6 audio integration
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -2065,125 +2594,129 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Account & Settings', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+          const Text('Settings', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
           const SizedBox(height: 4),
-          const Text('Manage user profile, blocked list, and account options', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: const Color(0xFF0D9488),
-                    child: Text(
-                      session != null && session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('@${session?.handle ?? "Unknown"}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        Text(session?.email ?? 'No email', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-                        const SizedBox(height: 4),
-                        Text('ID: ${session?.id ?? ""}', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontFamily: 'monospace')),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          const Text('Manage privacy, safety, and administrative account options', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
           const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Blocked Users', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
-              IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _fetchBlockedUsers),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_blockedUsers.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: const Text('No blocked users.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-            )
-          else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _blockedUsers.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final b = _blockedUsers[index];
-                final id = b['blockedUserId'];
-                final handle = b['userId'] ?? 'Blocked User';
 
-                return Card(
-                  child: ListTile(
-                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('ID: $id', style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
-                    trailing: OutlinedButton(
-                      onPressed: () => _unblockUser(id),
-                      child: const Text('Unblock'),
-                    ),
-                  ),
-                );
-              },
-            ),
-          const SizedBox(height: 24),
+          // Privacy & Safety Section
+          const Text('Privacy & Safety', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+          const SizedBox(height: 12),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Report a User', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
-                  const SizedBox(height: 12),
-                  if (_connections.isNotEmpty)
-                    DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: 'Select Contact to Report'),
-                      items: _connections.map<DropdownMenuItem<String>>((c) {
-                        return DropdownMenuItem<String>(
-                          value: c['connectedUserId'],
-                          child: Text('@${c['userId'] ?? c['connectedUserId']}'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Blocked Users', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                      IconButton(icon: const Icon(Icons.refresh, size: 18), onPressed: _fetchBlockedUsers),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_blockedUsers.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: const [
+                          Icon(Icons.shield_outlined, size: 36, color: Color(0xFFCBD5E1)),
+                          SizedBox(height: 8),
+                          Text(
+                            "You haven't blocked anyone.",
+                            style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _blockedUsers.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final b = _blockedUsers[index];
+                        final id = b['blockedUserId'];
+                        final handle = b['userId'] ?? 'Blocked User';
+
+                        return Card(
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: const Color(0xFFFFF1F2),
+                              foregroundColor: const Color(0xFFE11D48),
+                              child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'B'),
+                            ),
+                            title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            trailing: OutlinedButton(
+                              onPressed: () => _unblockUser(id),
+                              child: const Text('Unblock'),
+                            ),
+                          ),
                         );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          _reportUser(val);
-                        }
                       },
                     ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _reportReasonController,
-                    decoration: const InputDecoration(labelText: 'Reason (e.g. Spam, Harassment)'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _reportNoteController,
-                    decoration: const InputDecoration(labelText: 'Details / Note'),
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  const Text('Safety Reporting', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  const SizedBox(height: 6),
+                  const Text('Report inappropriate behavior or harassment directly to administrators.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                  const SizedBox(height: 14),
+                  ElevatedButton.icon(
+                    onPressed: _showReportUserDialog,
+                    icon: const Icon(Icons.flag_outlined, size: 18),
+                    label: const Text('Report a User'),
                   ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
+
+          // Account Section
+          const Text('Account', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Account Summary', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text('User Handle: ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                      Text('@${session?.handle ?? "Unknown"}', style: const TextStyle(color: Color(0xFF0F172A))),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Text('Email Address: ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                      Text(session?.email ?? 'No email address', style: const TextStyle(color: Color(0xFF0F172A))),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Danger Zone Block
           Card(
             color: const Color(0xFFFFF1F2),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: Color(0xFFFECDD3)),
+              side: const BorderSide(color: Color(0xFFFECDD3), width: 1.5),
             ),
             child: Padding(
               padding: const EdgeInsets.all(20),
@@ -2198,7 +2731,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
-                    onPressed: () => _showDeleteConfirmationDialog(),
+                    onPressed: _showDeleteConfirmationDialog,
                     icon: const Icon(Icons.delete_forever, size: 18),
                     label: const Text('Delete Account'),
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
@@ -2239,8 +2772,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Widget _buildDevConsoleSheet() {
+    final session = currentSession;
+
     return Container(
-      color: Colors.black.withOpacity(0.92),
+      color: const Color(0xEB000000),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2253,7 +2788,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   Icon(Icons.terminal, color: Color(0xFF4ADE80), size: 20),
                   SizedBox(width: 8),
                   Text(
-                    'Developer Console & E2E Test Harness',
+                    'Developer Tools & Test Harness',
                     style: TextStyle(color: Color(0xFF4ADE80), fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ],
@@ -2265,7 +2800,55 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             ],
           ),
           const SizedBox(height: 8),
-          // DEV NOTE: Dual user slot switcher is placed in Dev Console as a test harness convenience
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF334155)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _isHubConnected ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                          color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFE11D48),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isHubConnected ? 'SignalR Active' : 'SignalR Disconnected',
+                          style: TextStyle(color: _isHubConnected ? const Color(0xFF4ADE80) : const Color(0xFFF87171), fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _connectSignalR,
+                      icon: const Icon(Icons.sync, size: 14, color: Colors.white70),
+                      label: const Text('Reconnect SignalR', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        side: const BorderSide(color: Color(0xFF475569)),
+                      ),
+                    ),
+                  ],
+                ),
+                if (session != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Dev Debug GUID: ${session.id}',
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFF94A3B8)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -2279,7 +2862,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
-                    'Dual User Slot Switcher (Dev Harness Convenience - Not in primary consumer UI)',
+                    'Dual User Slot Switcher (Dev Harness Convenience)',
                     style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                   ),
                 ),
