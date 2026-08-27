@@ -14,20 +14,86 @@ class ConnectApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Connect E2E Test Client',
+      title: 'Connect',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0F172A),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF6366F1),
-          secondary: Color(0xFF06B6D4),
-          surface: Color(0xFF1E293B),
-          error: Color(0xFFF43F5E),
-        ),
         useMaterial3: true,
+        fontFamily: 'Roboto',
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF0D9488), // Emerald Teal accent
+          primary: const Color(0xFF0D9488),
+          onPrimary: Colors.white,
+          secondary: const Color(0xFF0F766E),
+          surface: Colors.white,
+          surfaceContainerLowest: const Color(0xFFF8FAFC),
+          error: const Color(0xFFE11D48),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          elevation: 0.5,
+          scrolledUnderElevation: 1.0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            color: Color(0xFF0F172A),
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+          iconTheme: IconThemeData(color: Color(0xFF0F172A)),
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF0D9488), width: 2),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE11D48)),
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0D9488),
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF475569),
+            side: const BorderSide(color: Color(0xFFCBD5E1)),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
       ),
-      home: const MainTestDashboard(),
+      home: const MainConsumerDashboard(),
     );
   }
 }
@@ -55,28 +121,30 @@ class UserSession {
   }
 }
 
-class MainTestDashboard extends StatefulWidget {
-  const MainTestDashboard({super.key});
+class MainConsumerDashboard extends StatefulWidget {
+  const MainConsumerDashboard({super.key});
 
   @override
-  State<MainTestDashboard> createState() => _MainTestDashboardState();
+  State<MainConsumerDashboard> createState() => _MainConsumerDashboardState();
 }
 
-class _MainTestDashboardState extends State<MainTestDashboard> with SingleTickerProviderStateMixin {
+class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   final String _baseUrl = 'https://connect-api-5633.azurewebsites.net';
 
+  // DEV NOTE: Dual user slot switcher (_user1Session vs _user2Session) is for dev/e2e test harness
+  // convenience only on web. Will be removed once single-account-per-device persistent auth is standard.
   UserSession? _user1Session;
   UserSession? _user2Session;
   int _activeSessionIndex = 1;
 
   UserSession? get currentSession => _activeSessionIndex == 1 ? _user1Session : _user2Session;
 
-  late TabController _tabController;
+  int _selectedNavIndex = 0;
 
   HubConnection? _hubConnection;
   bool _isHubConnected = false;
 
-  TextEditingController _searchQueryController = TextEditingController();
+  final TextEditingController _searchQueryController = TextEditingController();
   List<dynamic> _searchResults = [];
   bool _isSearching = false;
 
@@ -85,16 +153,23 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
   List<dynamic> _blockedUsers = [];
   List<dynamic> _callHistory = [];
 
-  TextEditingController _handleCheckController = TextEditingController();
+  final TextEditingController _handleCheckController = TextEditingController();
   String? _handleCheckResult;
+  bool? _isHandleAvailable;
+  bool _isCheckingHandle = false;
 
-  TextEditingController _regEmailController = TextEditingController(text: 'user1@connect.com');
-  TextEditingController _regPasswordController = TextEditingController(text: 'Password123!');
-  TextEditingController _regHandleController = TextEditingController(text: 'user_one');
-  TextEditingController _regPhoneController = TextEditingController(text: '1112223333');
+  final TextEditingController _regEmailController = TextEditingController(text: 'user1@connect.com');
+  final TextEditingController _regPasswordController = TextEditingController(text: 'Password123!');
+  final TextEditingController _regHandleController = TextEditingController(text: 'user_one');
+  final TextEditingController _regPhoneController = TextEditingController(text: '1112223333');
 
-  TextEditingController _loginEmailController = TextEditingController(text: 'user1@connect.com');
-  TextEditingController _loginPasswordController = TextEditingController(text: 'Password123!');
+  final TextEditingController _loginEmailController = TextEditingController(text: 'user1@connect.com');
+  final TextEditingController _loginPasswordController = TextEditingController(text: 'Password123!');
+
+  bool _isAuthModeLogin = true;
+  String? _authErrorMessage;
+  String? _authSuccessMessage;
+  bool _isAuthLoading = false;
 
   String _callStatusText = '';
   String? _activeCallId;
@@ -107,10 +182,11 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
   int _ringTimerSeconds = 15;
   Timer? _ringTimer;
 
-  TextEditingController _reportReasonController = TextEditingController();
-  TextEditingController _reportNoteController = TextEditingController();
+  final TextEditingController _reportReasonController = TextEditingController();
+  final TextEditingController _reportNoteController = TextEditingController();
 
-  List<String> _consoleLogs = [];
+  final List<String> _consoleLogs = [];
+  bool _showDevConsole = false;
 
   void _log(String message) {
     final timestamp = DateTime.now().toIso8601String().substring(11, 19);
@@ -122,12 +198,10 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
     _hubConnection?.stop();
     _callTimer?.cancel();
     _ringTimer?.cancel();
@@ -303,30 +377,67 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
   }
 
   Future<void> _checkHandleAvailability() async {
-    final value = _handleCheckController.text.trim();
-    if (value.isEmpty) return;
+    final value = _handleCheckController.text.trim().isNotEmpty
+        ? _handleCheckController.text.trim()
+        : _regHandleController.text.trim();
+    if (value.isEmpty) {
+      setState(() {
+        _handleCheckResult = 'Please enter a handle to check';
+        _isHandleAvailable = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isCheckingHandle = true;
+      _handleCheckResult = null;
+    });
 
     try {
       final res = await http.get(Uri.parse('$_baseUrl/api/v1/users/check-userid?value=$value'));
       final data = jsonDecode(res.body);
+      final bool isAvail = data['isAvailable'] == true;
       setState(() {
-        _handleCheckResult = res.statusCode == 200
-            ? 'Available: ${data['isAvailable']} (${data['message'] ?? ''})'
-            : 'Error: ${res.statusCode}';
+        _isHandleAvailable = isAvail;
+        _handleCheckResult = isAvail
+            ? '@$value is available!'
+            : (data['message'] ?? 'Handle @$value is taken');
       });
       _log('Check Handle ($value): ${res.body}');
     } catch (e) {
+      setState(() {
+        _isHandleAvailable = false;
+        _handleCheckResult = 'Could not verify handle availability';
+      });
       _log('Check Handle Exception: $e');
+    } finally {
+      setState(() {
+        _isCheckingHandle = false;
+      });
     }
   }
 
   Future<void> _registerUser(int sessionSlot) async {
+    setState(() {
+      _authErrorMessage = null;
+      _authSuccessMessage = null;
+      _isAuthLoading = true;
+    });
+
     final body = {
       'userId': _regHandleController.text.trim(),
       'email': _regEmailController.text.trim(),
       'password': _regPasswordController.text.trim(),
       'phoneNumber': _regPhoneController.text.trim(),
     };
+
+    if (body['userId']!.isEmpty || body['email']!.isEmpty || body['password']!.isEmpty) {
+      setState(() {
+        _authErrorMessage = 'Please fill in all required fields (Handle, Email, Password)';
+        _isAuthLoading = false;
+      });
+      return;
+    }
 
     try {
       final res = await http.post(
@@ -347,20 +458,48 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
             _user2Session = session;
           }
           _activeSessionIndex = sessionSlot;
+          _authSuccessMessage = 'Registered and logged in as @${session.handle}!';
         });
         await _connectSignalR();
         _refreshActiveTabData();
+      } else {
+        final data = jsonDecode(res.body);
+        final msg = data['message'] ?? data['title'] ?? 'Registration failed (${res.statusCode})';
+        setState(() {
+          _authErrorMessage = msg.toString();
+        });
       }
     } catch (e) {
+      setState(() {
+        _authErrorMessage = 'Connection failed: $e';
+      });
       _log('Register Exception: $e');
+    } finally {
+      setState(() {
+        _isAuthLoading = false;
+      });
     }
   }
 
   Future<void> _loginUser(int sessionSlot) async {
+    setState(() {
+      _authErrorMessage = null;
+      _authSuccessMessage = null;
+      _isAuthLoading = true;
+    });
+
     final body = {
       'emailOrUserId': _loginEmailController.text.trim(),
       'password': _loginPasswordController.text.trim(),
     };
+
+    if (body['emailOrUserId']!.isEmpty || body['password']!.isEmpty) {
+      setState(() {
+        _authErrorMessage = 'Please enter your email/handle and password';
+        _isAuthLoading = false;
+      });
+      return;
+    }
 
     try {
       final res = await http.post(
@@ -381,12 +520,26 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
             _user2Session = session;
           }
           _activeSessionIndex = sessionSlot;
+          _authSuccessMessage = 'Logged in successfully as @${session.handle}!';
         });
         await _connectSignalR();
         _refreshActiveTabData();
+      } else {
+        final data = jsonDecode(res.body);
+        final msg = data['message'] ?? data['title'] ?? 'Invalid credentials (${res.statusCode})';
+        setState(() {
+          _authErrorMessage = msg.toString();
+        });
       }
     } catch (e) {
+      setState(() {
+        _authErrorMessage = 'Connection failed: $e';
+      });
       _log('Login Exception: $e');
+    } finally {
+      setState(() {
+        _isAuthLoading = false;
+      });
     }
   }
 
@@ -443,6 +596,14 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
 
       _log('Send Connect Request -> Status ${res.statusCode}: ${res.body}');
       _fetchPendingRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.statusCode == 200 ? 'Connect request sent!' : 'Request sent or pending'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
       _log('Send Connect Request Exception: $e');
     }
@@ -481,6 +642,11 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
       _log('Accept Request $requestId -> Status ${res.statusCode}: ${res.body}');
       _fetchPendingRequests();
       _fetchConnections();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connection accepted!'), behavior: SnackBarBehavior.floating),
+        );
+      }
     } catch (e) {
       _log('Accept Request Exception: $e');
     }
@@ -628,6 +794,11 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
       _log('Block User $targetGuidId -> Status ${res.statusCode}');
       _fetchBlockedUsers();
       _fetchConnections();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User blocked'), behavior: SnackBarBehavior.floating),
+        );
+      }
     } catch (e) {
       _log('Block User Exception: $e');
     }
@@ -645,6 +816,11 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
 
       _log('Unblock User $targetGuidId -> Status ${res.statusCode}');
       _fetchBlockedUsers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User unblocked'), behavior: SnackBarBehavior.floating),
+        );
+      }
     } catch (e) {
       _log('Unblock User Exception: $e');
     }
@@ -693,6 +869,11 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
       _log('Report User $reportedGuidId -> Status ${res.statusCode}: ${res.body}');
       _reportReasonController.clear();
       _reportNoteController.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Report submitted. Thank you.'), behavior: SnackBarBehavior.floating),
+        );
+      }
     } catch (e) {
       _log('Report User Exception: $e');
     }
@@ -710,7 +891,22 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
 
       _log('Soft Delete Account -> Status ${res.statusCode}');
       if (res.statusCode == 204 || res.statusCode == 200) {
-        _log('Account soft-deleted. Log in again within 60 days to test silent reactivation.');
+        _log('Account soft-deleted. Log in again within 60 days to reactivate.');
+        setState(() {
+          if (_activeSessionIndex == 1) {
+            _user1Session = null;
+          } else {
+            _user2Session = null;
+          }
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Account marked for deletion (60-day recovery window). Logged out.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     } catch (e) {
       _log('Soft Delete Exception: $e');
@@ -729,83 +925,878 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
       _activeSessionIndex = slot;
     });
     _log('Switched Active Session Slot to User $slot (${currentSession?.handle ?? 'Logged Out'})');
-    await _connectSignalR();
-    _refreshActiveTabData();
+    if (currentSession != null) {
+      await _connectSignalR();
+      _refreshActiveTabData();
+    } else {
+      _hubConnection?.stop();
+      setState(() {
+        _isHubConnected = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final session = currentSession;
+    final isWide = MediaQuery.of(context).size.width > 768;
+
+    if (session == null) {
+      return Scaffold(
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Center(child: SingleChildScrollView(child: _buildAuthCard())),
+              Positioned(
+                bottom: 16,
+                right: 16,
+                child: FloatingActionButton.small(
+                  onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
+                  backgroundColor: const Color(0xFF334155),
+                  child: const Icon(Icons.developer_mode, color: Colors.white),
+                ),
+              ),
+              if (_showDevConsole) _buildDevConsoleSheet(),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Connect E2E Functional Tester (${session != null ? session.handle : "No Session"})'),
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: const [
-            Tab(text: '1. Auth & Users'),
-            Tab(text: '2. Directory & Search'),
-            Tab(text: '3. Connect Requests'),
-            Tab(text: '4. Calling & SignalR'),
-            Tab(text: '5. Call History'),
-            Tab(text: '6. Trust, Safety & Account'),
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0D9488),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '@${session.handle}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _isHubConnected ? 'Connected' : 'Offline',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                )
+              ],
+            ),
           ],
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Row(
-              children: [
-                ChoiceChip(
-                  label: Text('User 1 (${_user1Session != null ? _user1Session!.handle : "Empty"})'),
-                  selected: _activeSessionIndex == 1,
-                  onSelected: (val) => _switchSession(1),
+          IconButton(
+            icon: Icon(_showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined),
+            tooltip: 'Developer Console & Test Harness',
+            onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Log Out',
+            onPressed: () {
+              setState(() {
+                if (_activeSessionIndex == 1) {
+                  _user1Session = null;
+                } else {
+                  _user2Session = null;
+                }
+              });
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Row(
+            children: [
+              if (isWide)
+                NavigationRail(
+                  selectedIndex: _selectedNavIndex,
+                  onDestinationSelected: (idx) => setState(() => _selectedNavIndex = idx),
+                  labelType: NavigationRailLabelType.all,
+                  selectedIconTheme: const IconThemeData(color: Color(0xFF0D9488)),
+                  selectedLabelTextStyle: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                  destinations: [
+                    const NavigationRailDestination(
+                      icon: Icon(Icons.people_outline),
+                      selectedIcon: Icon(Icons.people),
+                      label: Text('Contacts'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Badge(
+                        isLabelVisible: _pendingRequests.isNotEmpty,
+                        label: Text('${_pendingRequests.length}'),
+                        child: const Icon(Icons.inbox_outlined),
+                      ),
+                      selectedIcon: Badge(
+                        isLabelVisible: _pendingRequests.isNotEmpty,
+                        label: Text('${_pendingRequests.length}'),
+                        child: const Icon(Icons.inbox),
+                      ),
+                      label: const Text('Requests'),
+                    ),
+                    const NavigationRailDestination(
+                      icon: Icon(Icons.phone_outlined),
+                      selectedIcon: Icon(Icons.phone),
+                      label: Text('Calls'),
+                    ),
+                    const NavigationRailDestination(
+                      icon: Icon(Icons.history_outlined),
+                      selectedIcon: Icon(Icons.history),
+                      label: Text('History'),
+                    ),
+                    const NavigationRailDestination(
+                      icon: Icon(Icons.settings_outlined),
+                      selectedIcon: Icon(Icons.settings),
+                      label: Text('Settings'),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: Text('User 2 (${_user2Session != null ? _user2Session!.handle : "Empty"})'),
-                  selected: _activeSessionIndex == 2,
-                  onSelected: (val) => _switchSession(2),
+              Expanded(
+                child: Container(
+                  color: const Color(0xFFF8FAFC),
+                  child: Column(
+                    children: [
+                      if (_isIncomingCall || _isRinging || _isActiveCall || _activeCallId != null)
+                        _buildCallTopBanner(),
+                      Expanded(
+                        child: IndexedStack(
+                          index: _selectedNavIndex,
+                          children: [
+                            _buildContactsScreen(),
+                            _buildConnectRequestsScreen(),
+                            _buildCallingScreen(),
+                            _buildCallHistoryScreen(),
+                            _buildAccountSettingsScreen(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_isIncomingCall || _isActiveCall)
+            Positioned.fill(child: _buildFullCallOverlay()),
+          if (_showDevConsole) _buildDevConsoleSheet(),
+        ],
+      ),
+      bottomNavigationBar: isWide
+          ? null
+          : NavigationBar(
+              selectedIndex: _selectedNavIndex,
+              onDestinationSelected: (idx) => setState(() => _selectedNavIndex = idx),
+              indicatorColor: const Color(0xFFCCFBF1),
+              destinations: [
+                const NavigationDestination(
+                  icon: Icon(Icons.people_outline),
+                  selectedIcon: Icon(Icons.people, color: Color(0xFF0D9488)),
+                  label: 'Contacts',
+                ),
+                NavigationDestination(
+                  icon: Badge(
+                    isLabelVisible: _pendingRequests.isNotEmpty,
+                    label: Text('${_pendingRequests.length}'),
+                    child: const Icon(Icons.inbox_outlined),
+                  ),
+                  selectedIcon: Badge(
+                    isLabelVisible: _pendingRequests.isNotEmpty,
+                    label: Text('${_pendingRequests.length}'),
+                    child: const Icon(Icons.inbox, color: Color(0xFF0D9488)),
+                  ),
+                  label: 'Requests',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.phone_outlined),
+                  selectedIcon: Icon(Icons.phone, color: Color(0xFF0D9488)),
+                  label: 'Calling',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.history_outlined),
+                  selectedIcon: Icon(Icons.history, color: Color(0xFF0D9488)),
+                  label: 'History',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings, color: Color(0xFF0D9488)),
+                  label: 'Settings',
                 ),
               ],
             ),
-          )
-        ],
-      ),
-      body: Column(
-        children: [
-          if (_isIncomingCall || _isRinging || _isActiveCall || _activeCallId != null)
-            _buildCallOverlayBar(),
+    );
+  }
 
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
+  Widget _buildAuthCard() {
+    return Container(
+      width: 420,
+      padding: const EdgeInsets.all(28),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F0F172A),
+            blurRadius: 24,
+            offset: Offset(0, 8),
+          ),
+        ],
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D9488).withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.forum_rounded, color: Color(0xFF0D9488), size: 26),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Connect',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Simple, secure voice signaling and contact connections',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.all(4),
+            child: Row(
               children: [
-                _buildAuthTab(),
-                _buildDirectoryTab(),
-                _buildConnectRequestsTab(),
-                _buildCallingTab(),
-                _buildCallHistoryTab(),
-                _buildTrustAndSafetyTab(),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _isAuthModeLogin = true;
+                      _authErrorMessage = null;
+                      _authSuccessMessage = null;
+                    }),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _isAuthModeLogin ? Colors.white : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: _isAuthModeLogin
+                            ? [const BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2))]
+                            : [],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Log In',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: _isAuthModeLogin ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _isAuthModeLogin = false;
+                      _authErrorMessage = null;
+                      _authSuccessMessage = null;
+                    }),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: !_isAuthModeLogin ? Colors.white : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: !_isAuthModeLogin
+                            ? [const BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2))]
+                            : [],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Create Account',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: !_isAuthModeLogin ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-
-          _buildConsoleFooter(),
+          const SizedBox(height: 20),
+          if (_authErrorMessage != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF1F2),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFECDD3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Color(0xFFE11D48), size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _authErrorMessage!,
+                      style: const TextStyle(color: Color(0xFFBE123C), fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_authSuccessMessage != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFA7F3D0)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_outline, color: Color(0xFF059669), size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _authSuccessMessage!,
+                      style: const TextStyle(color: Color(0xFF047857), fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_isAuthModeLogin) ...[
+            TextField(
+              controller: _loginEmailController,
+              decoration: const InputDecoration(
+                labelText: 'Email or User ID',
+                prefixIcon: Icon(Icons.person_outline, size: 20),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _loginPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                prefixIcon: Icon(Icons.lock_outline, size: 20),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _isAuthLoading ? null : () => _loginUser(_activeSessionIndex),
+              child: _isAuthLoading
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  // : Text('Log In into User Slot $_activeSessionIndex'),
+                  : Text('Log In'),
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _regHandleController,
+                    decoration: const InputDecoration(
+                      labelText: 'User ID Handle (@handle)',
+                      prefixIcon: Icon(Icons.alternate_email, size: 20),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: _isCheckingHandle ? null : _checkHandleAvailability,
+                  child: _isCheckingHandle
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Check'),
+                ),
+              ],
+            ),
+            if (_handleCheckResult != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 4),
+                child: Text(
+                  _handleCheckResult!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: _isHandleAvailable == true ? const Color(0xFF059669) : const Color(0xFFE11D48),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _regEmailController,
+              decoration: const InputDecoration(
+                labelText: 'Email Address',
+                prefixIcon: Icon(Icons.email_outlined, size: 20),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _regPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                prefixIcon: Icon(Icons.lock_outline, size: 20),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _regPhoneController,
+              decoration: const InputDecoration(
+                labelText: 'Phone Number',
+                prefixIcon: Icon(Icons.phone_outlined, size: 20),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _isAuthLoading ? null : () => _registerUser(_activeSessionIndex),
+              child: _isAuthLoading
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : Text('Create Account in Slot $_activeSessionIndex'),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildCallOverlayBar() {
+  Widget _buildContactsScreen() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Search & Connect', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+          const SizedBox(height: 4),
+          const Text('Find contacts by handle or phone number', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchQueryController,
+                  onSubmitted: (_) => _searchUsers(),
+                  decoration: const InputDecoration(
+                    hintText: 'Search user handle (e.g. user_two) or phone...',
+                    prefixIcon: Icon(Icons.search, size: 22),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: _searchUsers,
+                child: const Text('Search'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          if (_isSearching)
+            const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+          else if (_searchResults.isNotEmpty) ...[
+            const Text('Search Results', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+            const SizedBox(height: 12),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _searchResults.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final item = _searchResults[index];
+                final guidId = item['id'];
+                final handle = item['userId'] ?? 'User';
+                final phone = item['phoneNumber'] ?? 'N/A';
+
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: const Color(0xFFCCFBF1),
+                          foregroundColor: const Color(0xFF0D9488),
+                          child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'U'),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                              Text('Phone: $phone', style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => _sendConnectRequest(guidId),
+                          icon: const Icon(Icons.person_add_alt_1, size: 18),
+                          label: const Text('Connect'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            textStyle: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Connected Contacts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+              IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _fetchConnections),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_connections.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              alignment: Alignment.center,
+              child: Column(
+                children: const [
+                  Icon(Icons.people_outline, size: 48, color: Color(0xFFCBD5E1)),
+                  SizedBox(height: 12),
+                  Text('No connected contacts yet', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF475569))),
+                  SizedBox(height: 4),
+                  Text('Search for users above and send a connect request.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                ],
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _connections.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final conn = _connections[index];
+                final targetGuidId = conn['connectedUserId'];
+                final handle = conn['userId'] ?? 'Contact';
+                final presence = conn['presenceStatus'] ?? 'Offline';
+                final isOnline = presence.toString().toLowerCase() == 'online';
+
+                return Card(
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Stack(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: const Color(0xFFF1F5F9),
+                          foregroundColor: const Color(0xFF334155),
+                          child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'C'),
+                        ),
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: isOnline ? const Color(0xFF10B981) : const Color(0xFFCBD5E1),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('Status: $presence', style: TextStyle(color: isOnline ? const Color(0xFF059669) : const Color(0xFF64748B), fontSize: 12)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () => _initiateCall(targetGuidId, handle),
+                          icon: const Icon(Icons.phone, size: 16),
+                          label: const Text('Call'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            textStyle: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          icon: const Icon(Icons.block, color: Color(0xFFE11D48), size: 20),
+                          tooltip: 'Block user',
+                          onPressed: () => _blockUser(targetGuidId),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectRequestsScreen() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Connect Requests', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  SizedBox(height: 4),
+                  Text('Incoming connection requests from other users', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                ],
+              ),
+              IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchPendingRequests),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: _pendingRequests.isEmpty
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(40),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.inbox_outlined, size: 56, color: Color(0xFFCBD5E1)),
+                        SizedBox(height: 16),
+                        Text('No pending requests', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF475569))),
+                        SizedBox(height: 6),
+                        Text('When users send you connect requests, they will appear here.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _pendingRequests.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final req = _pendingRequests[index];
+                      final reqId = req['requestId'];
+                      final senderHandle = req['senderUserId'] ?? 'Unknown';
+
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: const Color(0xFFFEF3C7),
+                                foregroundColor: const Color(0xFFD97706),
+                                child: Text(senderHandle.isNotEmpty ? senderHandle[0].toUpperCase() : 'R'),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('@$senderHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    const SizedBox(height: 2),
+                                    Text('Wants to connect with you', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                              ElevatedButton(
+                                onPressed: () => _acceptConnectRequest(reqId),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0D9488),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                ),
+                                child: const Text('Accept'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCallingScreen() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Voice Calling', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  SizedBox(height: 4),
+                  Text('SignalR real-time call state and active connections', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                ],
+              ),
+              OutlinedButton.icon(
+                onPressed: _connectSignalR,
+                icon: const Icon(Icons.sync, size: 18),
+                label: const Text('Reconnect SignalR'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _isHubConnected ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                  color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFE11D48),
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isHubConnected ? 'SignalR Hub Active' : 'SignalR Disconnected',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      Text(
+                        _isHubConnected
+                            ? 'Ready for incoming & outgoing call signals'
+                            : 'Click reconnect to restore call listener',
+                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text('Quick Call Dialing', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+          const SizedBox(height: 12),
+          if (_connections.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              alignment: Alignment.center,
+              child: const Text('No contacts available to call. Connect with users first.', style: TextStyle(color: Color(0xFF64748B))),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _connections.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final conn = _connections[index];
+                final targetGuidId = conn['connectedUserId'];
+                final handle = conn['userId'] ?? 'User';
+
+                return Card(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: const Color(0xFFCCFBF1),
+                      foregroundColor: const Color(0xFF0D9488),
+                      child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'U'),
+                    ),
+                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: const Text('Voice Call via SignalR', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    trailing: ElevatedButton.icon(
+                      onPressed: () => _initiateCall(targetGuidId, handle),
+                      icon: const Icon(Icons.phone, size: 18),
+                      label: const Text('Initiate Call'),
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCallTopBanner() {
     return Container(
       color: _isActiveCall
-          ? Colors.green.shade900
+          ? const Color(0xFF059669)
           : _isIncomingCall
-              ? Colors.amber.shade900
-              : Colors.indigo.shade900,
-      padding: const EdgeInsets.all(12),
+              ? const Color(0xFFD97706)
+              : const Color(0xFF2563EB),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -825,12 +1816,12 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
                 children: [
                   Text(
                     _callStatusText,
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14),
                   ),
                   if (_isActiveCall)
-                    Text('Duration: ${_callTimerSeconds}s', style: const TextStyle(color: Colors.white70)),
+                    Text('Duration: ${_callTimerSeconds}s', style: const TextStyle(color: Colors.white70, fontSize: 12)),
                   if (_isIncomingCall || _isRinging)
-                    Text('Ring Timeout: ${_ringTimerSeconds}s', style: const TextStyle(color: Colors.white70)),
+                    Text('Timeout: ${_ringTimerSeconds}s', style: const TextStyle(color: Colors.white70, fontSize: 12)),
                 ],
               ),
             ],
@@ -838,339 +1829,224 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
           Row(
             children: [
               if (_isIncomingCall) ...[
-                ElevatedButton.icon(
+                ElevatedButton(
                   onPressed: () => _respondToCall(true),
-                  icon: const Icon(Icons.call),
-                  label: const Text('Accept'),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF059669)),
+                  child: const Text('Accept'),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton.icon(
+                ElevatedButton(
                   onPressed: () => _respondToCall(false),
-                  icon: const Icon(Icons.call_end),
-                  label: const Text('Decline'),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+                  child: const Text('Decline'),
                 ),
               ],
               if (_isActiveCall || _isRinging)
                 ElevatedButton.icon(
                   onPressed: _endCall,
-                  icon: const Icon(Icons.call_end),
+                  icon: const Icon(Icons.call_end, size: 18),
                   label: const Text('End Call'),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
                 ),
             ],
-          )
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildAuthTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+  Widget _buildFullCallOverlay() {
+    return Container(
+      color: const Color(0xFF0F172A).withOpacity(0.96),
+      padding: const EdgeInsets.all(32),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('Step 1: User Handle Availability Check', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _handleCheckController,
-                  decoration: const InputDecoration(labelText: 'User ID Handle (e.g. user_one)', border: OutlineInputBorder()),
-                ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: _checkHandleAvailability,
-                child: const Text('Check Availability'),
-              ),
-            ],
-          ),
-          if (_handleCheckResult != null)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text(_handleCheckResult!, style: const TextStyle(color: Colors.cyan)),
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF0D9488).withOpacity(0.2),
+              border: Border.all(color: const Color(0xFF0D9488), width: 3),
             ),
-          const Divider(height: 32),
-
-          const Text('Register User into Selected Slot', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            child: Center(
+              child: Text(
+                (_callerOrCalleeName != null && _callerOrCalleeName!.isNotEmpty)
+                    ? _callerOrCalleeName![0].toUpperCase()
+                    : 'C',
+                style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            '@${_callerOrCalleeName ?? "Unknown"}',
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
           const SizedBox(height: 8),
-          TextField(controller: _regHandleController, decoration: const InputDecoration(labelText: 'User ID (@handle)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _regEmailController, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _regPasswordController, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _regPhoneController, decoration: const InputDecoration(labelText: 'Phone Number', border: OutlineInputBorder())),
+          Text(
+            _isActiveCall ? 'Call Active' : 'Incoming Voice Call...',
+            style: TextStyle(fontSize: 16, color: Colors.teal.shade200),
+          ),
           const SizedBox(height: 12),
+          if (_isActiveCall)
+            Text(
+              '${(_callTimerSeconds ~/ 60).toString().padLeft(2, '0')}:${(_callTimerSeconds % 60).toString().padLeft(2, '0')}',
+              style: const TextStyle(fontSize: 36, fontFamily: 'monospace', color: Colors.white),
+            ),
+          if (_isIncomingCall)
+            Text(
+              'Ringing... (${_ringTimerSeconds}s remaining)',
+              style: const TextStyle(fontSize: 14, color: Colors.amberAccent),
+            ),
+          const SizedBox(height: 40),
+          // Audio controls visually disabled/inert as requested for Sprint 7.6 audio integration
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ElevatedButton(
-                onPressed: () => _registerUser(1),
-                child: const Text('Register as User 1'),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: () => _registerUser(2),
-                child: const Text('Register as User 2'),
-              ),
-            ],
-          ),
-          const Divider(height: 32),
-
-          const Text('Login Existing User into Selected Slot', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          TextField(controller: _loginEmailController, decoration: const InputDecoration(labelText: 'Email or User ID', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _loginPasswordController, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              ElevatedButton(
-                onPressed: () => _loginUser(1),
-                child: const Text('Login into User 1 Slot'),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: () => _loginUser(2),
-                child: const Text('Login into User 2 Slot'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDirectoryTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Step 2: Search Users by User ID or Phone Number', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchQueryController,
-                  decoration: const InputDecoration(labelText: 'Query (User ID handle or phone number)', border: OutlineInputBorder()),
-                ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: _searchUsers,
-                child: const Text('Search'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _isSearching
-              ? const CircularProgressIndicator()
-              : Expanded(
-                  child: ListView.builder(
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final item = _searchResults[index];
-                      final guidId = item['id'];
-                      final handle = item['userId'];
-                      final phone = item['phoneNumber'];
-
-                      return Card(
-                        child: ListTile(
-                          title: Text(handle ?? 'User'),
-                          subtitle: Text('Phone: $phone | Guid ID: $guidId'),
-                          trailing: ElevatedButton(
-                            onPressed: () => _sendConnectRequest(guidId),
-                            child: const Text('Send Connect Request'),
-                          ),
-                        ),
-                      );
-                    },
+              Tooltip(
+                message: 'Audio Mute (Inert - Sprint 7.6)',
+                child: Opacity(
+                  opacity: 0.4,
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(color: Color(0xFF334155), shape: BoxShape.circle),
+                    child: const Icon(Icons.mic_off, color: Colors.white, size: 28),
                   ),
                 ),
+              ),
+              const SizedBox(width: 24),
+              Tooltip(
+                message: 'Speakerphone (Inert - Sprint 7.6)',
+                child: Opacity(
+                  opacity: 0.4,
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(color: Color(0xFF334155), shape: BoxShape.circle),
+                    child: const Icon(Icons.volume_up, color: Colors.white, size: 28),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Audio controls inert (Sprint 7.6 audio integration)',
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 48),
+          if (_isIncomingCall)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FloatingActionButton.large(
+                  onPressed: () => _respondToCall(true),
+                  backgroundColor: const Color(0xFF10B981),
+                  child: const Icon(Icons.call, size: 36, color: Colors.white),
+                ),
+                const SizedBox(width: 48),
+                FloatingActionButton.large(
+                  onPressed: () => _respondToCall(false),
+                  backgroundColor: const Color(0xFFE11D48),
+                  child: const Icon(Icons.call_end, size: 36, color: Colors.white),
+                ),
+              ],
+            )
+          else
+            FloatingActionButton.large(
+              onPressed: _endCall,
+              backgroundColor: const Color(0xFFE11D48),
+              child: const Icon(Icons.call_end, size: 36, color: Colors.white),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildConnectRequestsTab() {
+  Widget _buildCallHistoryScreen() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Step 3: Pending Connect Requests & Active Connections', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              IconButton(icon: const Icon(Icons.refresh), onPressed: _refreshActiveTabData),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text('Pending Connect Requests Received:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber)),
-          SizedBox(
-            height: 180,
-            child: _pendingRequests.isEmpty
-                ? const Center(child: Text('No pending connect requests.'))
-                : ListView.builder(
-                    itemCount: _pendingRequests.length,
-                    itemBuilder: (context, index) {
-                      final req = _pendingRequests[index];
-                      final reqId = req['requestId'];
-                      final senderHandle = req['senderUserId'];
-
-                      return Card(
-                        child: ListTile(
-                          title: Text('From: $senderHandle'),
-                          subtitle: Text('Request ID: $reqId'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ElevatedButton(
-                                onPressed: () => _acceptConnectRequest(reqId),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                child: const Text('Accept'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          const Divider(height: 24),
-          const Text('My Connected Contacts:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlue)),
-          Expanded(
-            child: _connections.isEmpty
-                ? const Center(child: Text('No connections yet. Send & accept requests first.'))
-                : ListView.builder(
-                    itemCount: _connections.length,
-                    itemBuilder: (context, index) {
-                      final conn = _connections[index];
-                      final targetGuidId = conn['connectedUserId'];
-                      final handle = conn['userId'];
-                      final presence = conn['presenceStatus'];
-
-                      return Card(
-                        child: ListTile(
-                          title: Text(handle ?? 'Connected Contact'),
-                          subtitle: Text('Status: $presence | Guid ID: $targetGuidId'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: () => _initiateCall(targetGuidId, handle),
-                                icon: const Icon(Icons.call),
-                                label: const Text('Voice Call'),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                icon: const Icon(Icons.block, color: Colors.red),
-                                tooltip: 'Block User',
-                                onPressed: () => _blockUser(targetGuidId),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCallingTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Step 4 & 6: Voice Call Signaling & SignalR Control', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text('SignalR Connection Status: ${_isHubConnected ? "Connected" : "Disconnected"}',
-              style: TextStyle(color: _isHubConnected ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          ElevatedButton.icon(
-            onPressed: _connectSignalR,
-            icon: const Icon(Icons.sync),
-            label: const Text('Reconnect SignalR Hub'),
-          ),
-          const Divider(height: 24),
-          const Text('My Connections (Quick Call Launch):', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _connections.length,
-            itemBuilder: (context, index) {
-              final conn = _connections[index];
-              final targetGuidId = conn['connectedUserId'];
-              final handle = conn['userId'];
-
-              return ListTile(
-                title: Text(handle ?? 'User'),
-                subtitle: Text('Guid ID: $targetGuidId'),
-                trailing: ElevatedButton(
-                  onPressed: () => _initiateCall(targetGuidId, handle),
-                  child: const Text('Call Voice'),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCallHistoryTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Step 5 & 6: Call History Logs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Call History', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  SizedBox(height: 4),
+                  Text('Recent voice call logs and status', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                ],
+              ),
               IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchCallHistory),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
           Expanded(
             child: _callHistory.isEmpty
-                ? const Center(child: Text('No call history records found.'))
-                : ListView.builder(
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(40),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.history_toggle_off, size: 56, color: Color(0xFFCBD5E1)),
+                        SizedBox(height: 16),
+                        Text('No call history records', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF475569))),
+                        SizedBox(height: 6),
+                        Text('Completed, rejected, or missed calls will be listed here.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
                     itemCount: _callHistory.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final item = _callHistory[index];
                       final isOutgoing = item['isOutgoing'] ?? false;
-                      final callerUserId = item['callerUserId'];
-                      final calleeUserId = item['calleeUserId'];
-                      final status = item['status'];
+                      final callerUserId = item['callerUserId'] ?? 'Unknown';
+                      final calleeUserId = item['calleeUserId'] ?? 'Unknown';
+                      final status = item['status'] ?? 'Unknown';
                       final reason = item['missedReason'];
-                      final duration = item['durationSeconds'];
-                      final startedAt = item['startedAt'];
+                      final duration = item['durationSeconds'] ?? 0;
+                      final startedAt = item['startedAt'] ?? '';
 
                       final otherPerson = isOutgoing ? calleeUserId : callerUserId;
-                      final directionText = isOutgoing ? 'Outgoing Call -> $otherPerson' : 'Incoming Call <- $otherPerson';
+                      final bool isAccepted = status == 'Accepted';
 
                       return Card(
                         child: ListTile(
-                          leading: Icon(
-                            status == 'Accepted'
-                                ? (isOutgoing ? Icons.call_made : Icons.call_received)
-                                : Icons.call_missed,
-                            color: status == 'Accepted' ? Colors.green : Colors.red,
+                          leading: CircleAvatar(
+                            backgroundColor: isAccepted
+                                ? (isOutgoing ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF))
+                                : const Color(0xFFFFF1F2),
+                            foregroundColor: isAccepted
+                                ? (isOutgoing ? const Color(0xFF059669) : const Color(0xFF2563EB))
+                                : const Color(0xFFE11D48),
+                            child: Icon(
+                              isAccepted
+                                  ? (isOutgoing ? Icons.call_made : Icons.call_received)
+                                  : Icons.call_missed,
+                              size: 20,
+                            ),
                           ),
-                          title: Text(directionText),
-                          subtitle: Text('Status: $status ${reason != null ? "($reason)" : ""} | Duration: ${duration}s | Time: $startedAt'),
+                          title: Text('@$otherPerson', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text(
+                            '${isOutgoing ? "Outgoing" : "Incoming"} • Status: $status ${reason != null ? "($reason)" : ""}\nTime: $startedAt',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                          ),
+                          trailing: Text(
+                            '${duration}s',
+                            style: const TextStyle(fontFamily: 'monospace', color: Color(0xFF475569)),
+                          ),
                         ),
                       );
                     },
@@ -1181,104 +2057,274 @@ class _MainTestDashboardState extends State<MainTestDashboard> with SingleTicker
     );
   }
 
-  Widget _buildTrustAndSafetyTab() {
+  Widget _buildAccountSettingsScreen() {
+    final session = currentSession;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Step 7: Blocked Users List', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          ElevatedButton(onPressed: _fetchBlockedUsers, child: const Text('Refresh Blocked Users')),
-          const SizedBox(height: 8),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _blockedUsers.length,
-            itemBuilder: (context, index) {
-              final b = _blockedUsers[index];
-              final id = b['blockedUserId'];
-              final handle = b['userId'];
-
-              return ListTile(
-                title: Text(handle ?? 'Blocked User'),
-                subtitle: Text('Guid ID: $id'),
-                trailing: ElevatedButton(
-                  onPressed: () => _unblockUser(id),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                  child: const Text('Unblock'),
-                ),
-              );
-            },
+          const Text('Account & Settings', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+          const SizedBox(height: 4),
+          const Text('Manage user profile, blocked list, and account options', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+          const SizedBox(height: 20),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: const Color(0xFF0D9488),
+                    child: Text(
+                      session != null && session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('@${session?.handle ?? "Unknown"}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        Text(session?.email ?? 'No email', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                        const SizedBox(height: 4),
+                        Text('ID: ${session?.id ?? ""}', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontFamily: 'monospace')),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          const Divider(height: 32),
-
-          const Text('Step 8: Report User Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Blocked Users', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+              IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _fetchBlockedUsers),
+            ],
+          ),
           const SizedBox(height: 8),
-          if (_connections.isNotEmpty)
-            DropdownButton<String>(
-              hint: const Text('Select Connected User to Report'),
-              isExpanded: true,
-              items: _connections.map<DropdownMenuItem<String>>((c) {
-                return DropdownMenuItem<String>(
-                  value: c['connectedUserId'],
-                  child: Text(c['userId'] ?? c['connectedUserId']),
+          if (_blockedUsers.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Text('No blocked users.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _blockedUsers.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final b = _blockedUsers[index];
+                final id = b['blockedUserId'];
+                final handle = b['userId'] ?? 'Blocked User';
+
+                return Card(
+                  child: ListTile(
+                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('ID: $id', style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+                    trailing: OutlinedButton(
+                      onPressed: () => _unblockUser(id),
+                      child: const Text('Unblock'),
+                    ),
+                  ),
                 );
-              }).toList(),
-              onChanged: (val) {
-                if (val != null) {
-                  _reportUser(val);
-                }
               },
             ),
-          const SizedBox(height: 8),
-          TextField(controller: _reportReasonController, decoration: const InputDecoration(labelText: 'Reason (e.g. Harassment, Spam)', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _reportNoteController, decoration: const InputDecoration(labelText: 'Note / Details', border: OutlineInputBorder())),
-          const Divider(height: 32),
-
-          const Text('Step 9: Account Lifecycle & Soft-Delete', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text('Soft-deleting your account will flag it as deleted with a 60-day window. Logging back in during the window will silently reactivate it.'),
-          const SizedBox(height: 12),
-          ElevatedButton.icon(
-            onPressed: _softDeleteAccount,
-            icon: const Icon(Icons.delete_forever),
-            label: const Text('Soft-Delete My Account'),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Report a User', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+                  const SizedBox(height: 12),
+                  if (_connections.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      decoration: const InputDecoration(labelText: 'Select Contact to Report'),
+                      items: _connections.map<DropdownMenuItem<String>>((c) {
+                        return DropdownMenuItem<String>(
+                          value: c['connectedUserId'],
+                          child: Text('@${c['userId'] ?? c['connectedUserId']}'),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          _reportUser(val);
+                        }
+                      },
+                    ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _reportReasonController,
+                    decoration: const InputDecoration(labelText: 'Reason (e.g. Spam, Harassment)'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _reportNoteController,
+                    decoration: const InputDecoration(labelText: 'Details / Note'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Card(
+            color: const Color(0xFFFFF1F2),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xFFFECDD3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Danger Zone', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFBE123C))),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Soft-deleting your account flags it for deletion with a 60-day recovery window. Logging back in during this window automatically reactivates your account.',
+                    style: TextStyle(color: Color(0xFF9F1239), fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: () => _showDeleteConfirmationDialog(),
+                    icon: const Icon(Icons.delete_forever, size: 18),
+                    label: const Text('Delete Account'),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildConsoleFooter() {
+  void _showDeleteConfirmationDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Account?'),
+        content: const Text(
+          'Are you sure you want to delete your account?\n\nYour account will be flagged as deleted with a 60-day recovery window. Logging in within 60 days will reactivate it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _softDeleteAccount();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
+            child: const Text('Confirm Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDevConsoleSheet() {
     return Container(
-      height: 160,
-      color: Colors.black,
-      padding: const EdgeInsets.all(8),
+      color: Colors.black.withOpacity(0.92),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Console Audit Log:', style: TextStyle(color: Colors.lightGreenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+              Row(
+                children: const [
+                  Icon(Icons.terminal, color: Color(0xFF4ADE80), size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Developer Console & E2E Test Harness',
+                    style: TextStyle(color: Color(0xFF4ADE80), fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70),
+                onPressed: () => setState(() => _showDevConsole = false),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // DEV NOTE: Dual user slot switcher is placed in Dev Console as a test harness convenience
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF334155)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Color(0xFF38BDF8), size: 18),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Dual User Slot Switcher (Dev Harness Convenience - Not in primary consumer UI)',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  ),
+                ),
+                ChoiceChip(
+                  label: Text('User 1 (${_user1Session?.handle ?? "Empty"})'),
+                  selected: _activeSessionIndex == 1,
+                  onSelected: (_) => _switchSession(1),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: Text('User 2 (${_user2Session?.handle ?? "Empty"})'),
+                  selected: _activeSessionIndex == 2,
+                  onSelected: (_) => _switchSession(2),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Console Audit Trail:', style: TextStyle(color: Colors.white70, fontSize: 12)),
               TextButton(
                 onPressed: () => setState(() => _consoleLogs.clear()),
-                child: const Text('Clear Log', style: TextStyle(fontSize: 10, color: Colors.white54)),
-              )
+                child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
+              ),
             ],
           ),
           Expanded(
-            child: ListView.builder(
-              itemCount: _consoleLogs.length,
-              itemBuilder: (context, index) {
-                return SelectableText(
-                  _consoleLogs[index],
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.greenAccent),
-                );
-              },
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF020617),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF1E293B)),
+              ),
+              child: ListView.builder(
+                itemCount: _consoleLogs.length,
+                itemBuilder: (context, index) {
+                  return SelectableText(
+                    _consoleLogs[index],
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFF4ADE80)),
+                  );
+                },
+              ),
             ),
           ),
         ],
