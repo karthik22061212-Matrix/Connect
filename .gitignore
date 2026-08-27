@@ -1,0 +1,33 @@
+# Infrastructure & Deployment Secrets
+infra/*.env
+infra/azure-deployment-info.env
+*.env
+
+# Build & Compiler outputs
+bin/
+obj/
+publish/
+.vs/
+.idea/
+.vscode/
+
+# User-specific files
+*.user
+*.userosscache
+*.sln.docstates
+
+# Flutter & Dart artifacts
+frontend/.dart_tool/
+frontend/.idea/
+frontend/.pub/
+frontend/.pub-cache/
+frontend/build/
+
+# Operating System files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+infra/azure-deployment-info.env

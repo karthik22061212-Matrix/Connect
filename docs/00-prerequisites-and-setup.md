@@ -1,61 +1,47 @@
 # 00 - Prerequisites & Setup: Connect
 
-**Azure subscription is deferred** — Sprint 0 through Sprint 7 run on a local dev stack (see `04-sprint-plan.md`). Azure is only needed starting Sprint 7.5. Complete Steps 2–4 now; Step 1 can wait.
+**Azure subscription is now active.** Sprint 0 through Sprint 7.4 ran on the local dev stack (see `04-sprint-plan.md`). Sprint 7.5 (Azure Migration) can now begin.
 
 ---
 
-## Step 1: Create an Azure Account (can wait until Sprint 7.5)
-1. Go to https://azure.microsoft.com/free/
-2. Sign up with a Microsoft account (or create one)
-3. You'll need a credit card for verification (not charged unless you exceed free-tier limits)
-4. This gives you a 12-month free trial with $200 credit + always-free services (App Service F1, SQL DB, Static Web Apps, etc. — matches everything in `02-tech-stack.md`)
-5. Note down your **Subscription ID** once created (Azure Portal → Subscriptions)
+## Step 1: Create an Azure Account — ✅ DONE
+1. Account created with `karthik22061212@gmail.com`.
+2. Subscription confirmed **active** in Azure Portal.
+3. **Subscription ID:** `787de81a-4d56-4048-b30a-2414c153e3e1`
+4. **Tenant:** Default Directory (`karthik22061212gmail.onmicrosoft.com`), Tenant ID `25c36799-0594-4ac4-9794-82914cbda4fb`
+5. Note: this tenant had "Security Defaults" enabled by default, which blocked `az login` until disabled via Microsoft Entra ID → Properties → Manage Security Defaults. Also required personal-account two-step verification setup via https://account.microsoft.com/security before login would succeed.
 
-## Step 2: Create a Firebase Project (for push notifications)
-1. Go to https://console.firebase.google.com/
-2. Create a new project (name it "Connect" or similar)
-3. Enable **Cloud Messaging (FCM)** for the project
-4. Keep this project open — you'll need config keys when wiring up push notifications in Sprint 6
+## Step 2: Create a Firebase Project (for push notifications) — ✅ DONE
+Completed during Sprint 6 (push notification implementation).
 
-## Step 3: Create a Git Repository
-1. Create a new repo on GitHub (or Azure DevOps if you prefer tighter Azure integration)
-2. Suggested structure:
-   ```
-   connect/
-     backend/        (ASP.NET Core Web API)
-     frontend/        (Flutter app)
-     docs/            (these MD files go here)
-     infra/           (Azure CLI/Bicep provisioning scripts)
-   ```
-3. Push these 5 planning docs into `docs/` as the first commit
+## Step 3: Create a Git Repository — ✅ DONE
+Repo: `https://github.com/karthik22061212-Matrix/Connect.git`, local path `C:\Projects\Connect`.
 
-## Step 4: Install Local Tooling
-- [ ] **Azure CLI** — https://learn.microsoft.com/cli/azure/install-azure-cli
-- [ ] **.NET 8 SDK** — https://dotnet.microsoft.com/download
-- [ ] **Flutter SDK** — https://docs.flutter.dev/get-started/install
-- [ ] **Git**
+## Step 4: Install Local Tooling — ✅ DONE
+- [x] **Azure CLI** — installed via WinGet (`winget install --id Microsoft.AzureCLI -e`), version 2.89.1, authenticated via `az login --use-device-code`
+- [x] **.NET 8 SDK**
+- [x] **Flutter SDK**
+- [x] **Git**
 
-## Step 5: Provision Azure Resources (Sprint 7.5, deferred)
-Once your Azure subscription is active (Steps 1–4 done at that point), resource provisioning is scripted via Azure CLI (recommended — easiest, repeatable, and agent-friendly for BMAD/Antigravity to execute). This becomes **Sprint 7.5**, not Sprint 0, and will provision:
+## Step 5: Provision Azure Resources (Sprint 7.5 — now active)
+With the subscription confirmed active and Azure CLI authenticated, resource provisioning proceeds via Azure CLI script, to be generated and reviewed before execution. Will provision:
 - Resource Group
 - Azure App Service (Linux, F1 Free tier)
 - Azure SQL Database (Free tier)
 - Azure Static Web App (Free tier)
 - Azure B1s VM (for coturn TURN server)
 
-*(The actual CLI script will be generated once you confirm the subscription is active — no need to wait for it now.)*
-
 ---
 
-## Readiness Checklist (to start Sprint 0 — coding — now)
-- [ ] Firebase project created
-- [ ] Git repository created ✅
-- [ ] Local tooling installed (.NET 8 SDK, Flutter SDK, Git — Azure CLI can wait)
-- [ ] Planning docs (`00`–`05`) committed to repo
-- [ ] Local DB confirmed: **SQL Server LocalDB** (Windows dev environment)
+## Readiness Checklist (Sprint 0 — coding) — ✅ ALL COMPLETE
+- [x] Firebase project created
+- [x] Git repository created
+- [x] Local tooling installed (.NET 8 SDK, Flutter SDK, Git, Azure CLI)
+- [x] Planning docs (`00`–`08`) committed to repo
+- [x] Local DB confirmed: **SQL Server LocalDB** (Windows dev environment)
 
-## Readiness Checklist (to start Sprint 7.5 — Azure migration — later)
-- [ ] Azure account created, subscription active
-- [ ] Azure CLI installed
+## Readiness Checklist (Sprint 7.5 — Azure migration) — ✅ ALL COMPLETE
+- [x] Azure account created, subscription active (`787de81a-4d56-4048-b30a-2414c153e3e1`)
+- [x] Azure CLI installed and authenticated (`az account show` confirms active subscription)
 
-Once the first checklist is complete, Sprint 0 can begin right away.
+**Sprint 7.5 can begin.**

@@ -63,7 +63,7 @@ class MainTestDashboard extends StatefulWidget {
 }
 
 class _MainTestDashboardState extends State<MainTestDashboard> with SingleTickerProviderStateMixin {
-  final String _baseUrl = 'http://localhost:5200';
+  final String _baseUrl = 'https://connect-api-5633.azurewebsites.net';
 
   UserSession? _user1Session;
   UserSession? _user2Session;

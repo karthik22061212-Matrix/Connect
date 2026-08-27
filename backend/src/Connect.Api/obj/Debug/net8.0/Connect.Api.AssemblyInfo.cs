@@ -10,10 +10,11 @@
 using System;
 using System.Reflection;
 
+[assembly: Microsoft.Extensions.Configuration.UserSecrets.UserSecretsIdAttribute("connect-api-8f4b2d9e-1a2b-3c4d-5e6f-7a8b9c0d1e2f")]
 [assembly: System.Reflection.AssemblyCompanyAttribute("Connect.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ea2da433c55b4b6485aab5b1072a7e56bed53ae8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e4c4112aca7541da9df8e24e40c3b89c5e0d154f")]
 [assembly: System.Reflection.AssemblyProductAttribute("Connect.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Connect.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

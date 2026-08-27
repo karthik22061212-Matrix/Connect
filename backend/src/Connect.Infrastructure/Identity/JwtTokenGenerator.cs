@@ -19,10 +19,29 @@ public class JwtTokenGenerator : IJwtTokenGenerator
 
     public string GenerateToken(User user)
     {
-        var secret = _configuration["JwtSettings:Secret"] ?? "SuperSecretKeyForConnectAppJwtTokenGeneration2026!";
-        var issuer = _configuration["JwtSettings:Issuer"] ?? "ConnectApi";
-        var audience = _configuration["JwtSettings:Audience"] ?? "ConnectClient";
-        var expiryMinutesStr = _configuration["JwtSettings:ExpiryMinutes"] ?? "43200";
+        var secret = _configuration["JwtSettings:Secret"];
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            secret = "SuperSecretKeyForConnectAppJwtTokenGeneration2026!";
+        }
+
+        var issuer = _configuration["JwtSettings:Issuer"];
+        if (string.IsNullOrWhiteSpace(issuer))
+        {
+            issuer = "ConnectApi";
+        }
+
+        var audience = _configuration["JwtSettings:Audience"];
+        if (string.IsNullOrWhiteSpace(audience))
+        {
+            audience = "ConnectClient";
+        }
+
+        var expiryMinutesStr = _configuration["JwtSettings:ExpiryMinutes"];
+        if (string.IsNullOrWhiteSpace(expiryMinutesStr))
+        {
+            expiryMinutesStr = "43200";
+        }
         var expiryMinutes = double.TryParse(expiryMinutesStr, out var exp) ? exp : 43200;
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));

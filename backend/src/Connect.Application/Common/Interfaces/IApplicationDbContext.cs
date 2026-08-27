@@ -12,5 +12,6 @@ public interface IApplicationDbContext
     DbSet<Block> Blocks { get; }
     DbSet<Report> Reports { get; }
     DbSet<DeviceToken> DeviceTokens { get; }
+    Microsoft.EntityFrameworkCore.Infrastructure.DatabaseFacade Database { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

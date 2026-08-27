@@ -19,6 +19,13 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
+            connectionString = configuration["SQLAZURECONNSTR_DefaultConnection"]
+                ?? configuration["SQLCONNSTR_DefaultConnection"]
+                ?? configuration["ConnectionStrings__DefaultConnection"];
+        }
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
             connectionString = "Server=(localdb)\\mssqllocaldb;Database=ConnectDb;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True";
         }
 

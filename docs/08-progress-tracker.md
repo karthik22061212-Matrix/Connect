@@ -51,6 +51,7 @@ as they're completed — updating this file is part of finishing a task, not opt
 - [x] SignalR WebRTC signaling methods (offer/answer/ICE candidate relay)
 - [x] Ring timeout (15 sec) implemented
 - [x] `EndCall` command, call duration calculated
+- [ ] **CORRECTION (found 2026-08-26, during Sprint 7.5):** actual WebRTC audio layer is NOT implemented. No `flutter_webrtc` dependency, no `RTCPeerConnection`, `getUserMedia`, or `MediaStream` anywhere in `frontend/lib/main.dart`. Only SignalR signaling (offer/answer/ICE relay messages) exists — no audio has ever actually been transmitted between callers. STUN/TURN has no client-side consumer yet.
 
 ## Sprint 5 — Call Reliability
 - [x] Auto-reconnect logic on network drop (10-sec window)
@@ -89,6 +90,14 @@ as they're completed — updating this file is part of finishing a task, not opt
 - [ ] Flutter Web deployed to Azure Static Web Apps
 - [ ] coturn TURN server configured and reachable
 
+## Sprint 7.6 — WebRTC Media Layer (added 2026-08-26, addresses Sprint 4 correction above)
+- [ ] Add `flutter_webrtc` dependency to `frontend/pubspec.yaml`
+- [ ] Implement `getUserMedia` mic capture with permission handling (Web)
+- [ ] Implement `RTCPeerConnection` wired to existing SignalR offer/answer/ICE events
+- [ ] Wire `iceServers` config: STUN (public) + TURN (`turn:52.172.234.96:3478`, see `azure-deployment-info.env`)
+- [ ] Verify real two-way audio on an actual call (not just signaling state)
+- [ ] Handle renegotiation / cleanup on call end
+
 ## Sprint 8 — Web MVP Release
 - [ ] Final QA on live Azure deployment
 - [ ] Stable Web release tagged/deployed
@@ -114,3 +123,5 @@ as they're completed — updating this file is part of finishing a task, not opt
 - Session 10: Completed full End-to-end testing pass on Web (local) — built interactive functional test UI in Flutter Web app (`frontend/lib/main.dart`) supporting SignalR hub connection and dual session switcher. Executed complete 9-step E2E flow against running local API server (`http://localhost:5200`): handle availability check, registration, search, send/accept connect request, voice calling, call history, ring timeout missed call logging, block/unblock enforcement (verified 403 Forbidden when blocked), report user, and soft-delete account with silent reactivation upon login. Fixed DTO JSON property key mappings and CallsController SignalR imports. All 54 backend unit tests passing. Sprint 7 fully complete.
 - Session 11: Sprint 7.4 (Hardening & CI/CD) inserted into the plan — Azure subscription not yet active, so this sprint provides productive work with no cloud dependency while waiting.
 - Session 12: Completed Sprint 7.4 Hardening & CI/CD — created GitHub Actions CI workflow (`.github/workflows/ci.yml`), enforced registration password complexity rules (length + uppercase, lowercase, digit, special char) with unit tests (`RegisterUserCommandValidatorTests.cs`), added .NET 8 fixed-window rate limiting on `/api/v1/auth/register` and `/api/v1/auth/login`, tightened CORS policy to explicit configured allowed origins, separated `appsettings.Development.json` and `appsettings.Production.json`, configured `<UserSecretsId>` in `Connect.Api.csproj`, updated all REST controller routes to `/api/v1/...`, updated OpenAPI/Swagger documentation, and updated Flutter Web client HTTP API requests to `/api/v1/...`. All 60 unit tests passing. Sprint 7.4 fully complete.
+
+- Session 13: Discovered during Sprint 7.5 TURN verification that no WebRTC media/audio implementation exists in the Flutter client — only SignalR signaling was ever built. Corrected Sprint 4 tracker entry and added Sprint 7.6 (WebRTC Media Layer) before Sprint 8. Azure infra provisioning (Sprint 7.5) confirmed complete: SQL, App Service, Static Web App, and TURN VM all live; coturn installed and verified relaying via trickle-ice test (turn:52.172.234.96:3478).
