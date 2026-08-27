@@ -25,9 +25,16 @@ public class GetPendingRequestsQueryHandler : IRequestHandler<GetPendingRequests
 
         var allRequests = await _unitOfWork.ConnectRequests.ListAsync(cancellationToken);
         var allUsers = await _unitOfWork.Users.ListAsync(cancellationToken);
+        var allBlocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
+
+        var blockedUserIds = allBlocks
+            .Where(b => b.BlockerUserId == currentUserId || b.BlockedUserId == currentUserId)
+            .Select(b => b.BlockerUserId == currentUserId ? b.BlockedUserId : b.BlockerUserId)
+            .ToHashSet();
 
         var pendingRequests = allRequests
             .Where(r => r.ToUserId == currentUserId && r.Status == ConnectRequestStatus.Pending)
+            .Where(r => !blockedUserIds.Contains(r.FromUserId))
             .OrderByDescending(r => r.CreatedAt)
             .ToList();
 

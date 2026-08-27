@@ -19,5 +19,8 @@ public interface ICallHubClient
     Task NetworkReconnecting(Guid callId);
     Task NetworkRestored(Guid callId);
     Task CallFailed(Guid callId, string reason);
+    Task ConnectRequestReceived(Guid requestId, Guid fromUserId, string fromUserHandle);
+    Task ConnectRequestAccepted(Guid requestId, Guid contactId, string contactUserId);
+    Task ConnectRequestDeclined(Guid requestId, Guid decliningUserId);
 }
 

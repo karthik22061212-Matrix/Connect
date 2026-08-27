@@ -180,3 +180,10 @@ D:\Connect\backend\src\Connect.Api\obj\Debug\net8.0\Connect.Api.genruntimeconfig
 D:\Connect\backend\src\Connect.Api\obj\Debug\net8.0\ref\Connect.Api.dll
 D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\Microsoft.AspNetCore.Authentication.JwtBearer.dll
 D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\appsettings.Production.json
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\web.config
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\appsettings.Development.json
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\appsettings.json
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\appsettings.Production.json
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\Connect.Api.deps.json
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\Connect.Api.runtimeconfig.json
+D:\Connect\backend\src\Connect.Api\bin\Debug\net8.0\publish\Connect.Api.staticwebassets.endpoints.json

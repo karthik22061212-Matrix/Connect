@@ -24,9 +24,16 @@ public class GetConnectionsQueryHandler : IRequestHandler<GetConnectionsQuery, I
 
         var allConnections = await _unitOfWork.Connections.ListAsync(cancellationToken);
         var allUsers = await _unitOfWork.Users.ListAsync(cancellationToken);
+        var allBlocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
+
+        var blockedUserIds = allBlocks
+            .Where(b => b.BlockerUserId == currentUserId || b.BlockedUserId == currentUserId)
+            .Select(b => b.BlockerUserId == currentUserId ? b.BlockedUserId : b.BlockerUserId)
+            .ToHashSet();
 
         var userConnections = allConnections
             .Where(c => c.UserAId == currentUserId || c.UserBId == currentUserId)
+            .Where(c => !blockedUserIds.Contains(c.UserAId == currentUserId ? c.UserBId : c.UserAId))
             .OrderByDescending(c => c.CreatedAt)
             .ToList();
 

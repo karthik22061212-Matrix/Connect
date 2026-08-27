@@ -597,6 +597,34 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _fetchCallHistory();
     });
 
+    _hubConnection!.on('ConnectRequestReceived', (args) {
+      _log('SignalR Event: ConnectRequestReceived -> $args');
+      _fetchPendingRequests();
+      if (_searchQueryController.text.isNotEmpty) {
+        _searchUsers();
+      }
+    });
+
+    _hubConnection!.on('ConnectRequestAccepted', (args) {
+      _log('SignalR Event: ConnectRequestAccepted -> $args');
+      _fetchPendingRequests();
+      _fetchConnections();
+      if (_searchQueryController.text.isNotEmpty) {
+        _searchUsers();
+      }
+    });
+
+    _hubConnection!.on('ConnectRequestDeclined', (args) {
+      _log('SignalR Event: ConnectRequestDeclined -> $args');
+      _fetchPendingRequests();
+      _fetchConnections();
+      if (_searchQueryController.text.isNotEmpty) {
+        _searchUsers();
+      }
+    });
+
+
+
     try {
       await _hubConnection!.start();
       setState(() {
@@ -895,7 +923,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         });
       }
 
-      _fetchPendingRequests();
+      await _fetchPendingRequests();
+      await _fetchConnections();
+      if (_searchQueryController.text.trim().isNotEmpty) {
+        await _searchUsers();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -950,8 +982,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         return;
       }
 
-      _fetchPendingRequests();
-      _fetchConnections();
+      await _fetchPendingRequests();
+      await _fetchConnections();
+      if (_searchQueryController.text.trim().isNotEmpty) {
+        await _searchUsers();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Connection accepted!'), behavior: SnackBarBehavior.floating),
@@ -961,6 +996,37 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('Accept Request Exception: $e');
     }
   }
+  Future<void> _declineConnectRequest(String requestId) async {
+    final session = currentSession;
+    if (session == null) return;
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/api/v1/connect-requests/$requestId/decline'),
+        headers: {'Authorization': 'Bearer ${session.token}'},
+      );
+
+      _log('Decline Request $requestId -> Status ${res.statusCode}: ${res.body}');
+      if (res.statusCode == 401) {
+        _handle401();
+        return;
+      }
+
+      await _fetchPendingRequests();
+      await _fetchConnections();
+      if (_searchQueryController.text.trim().isNotEmpty) {
+        await _searchUsers();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connect request declined.'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      _log('Decline Request Exception: $e');
+    }
+  }
+
 
   Future<void> _fetchConnections() async {
     final session = currentSession;
@@ -980,6 +1046,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (res.statusCode == 200) {
         setState(() {
           _connections = jsonDecode(res.body);
+          _sentRequests.removeWhere((req) => _connections.any((c) =>
+              (c['contactId'] ?? c['connectedUserId']) == req['toUserId'] ||
+              (c['contactUserId'] ?? c['userId']) == req['targetHandle']));
         });
       }
     } catch (e) {
@@ -1121,8 +1190,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         return;
       }
 
-      _fetchBlockedUsers();
-      _fetchConnections();
+      await _fetchBlockedUsers();
+      await _fetchConnections();
+      await _fetchPendingRequests();
+      if (_searchQueryController.text.trim().isNotEmpty) {
+        await _searchUsers();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('User blocked'), behavior: SnackBarBehavior.floating),
@@ -1149,7 +1222,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         return;
       }
 
-      _fetchBlockedUsers();
+      await _fetchBlockedUsers();
+      await _fetchConnections();
+      await _fetchPendingRequests();
+      if (_searchQueryController.text.trim().isNotEmpty) {
+        await _searchUsers();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('User unblocked'), behavior: SnackBarBehavior.floating),
@@ -1343,9 +1421,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'Select Contact'),
                   items: _connections.map<DropdownMenuItem<String>>((c) {
+                    final cId = c['contactId'] ?? c['connectedUserId'];
+                    final cHandle = c['contactUserId'] ?? c['userId'] ?? cId;
                     return DropdownMenuItem<String>(
-                      value: c['connectedUserId'],
-                      child: Text('@${c['userId'] ?? c['connectedUserId']}'),
+                      value: cId,
+                      child: Text('@$cHandle'),
                     );
                   }).toList(),
                   onChanged: (val) {
@@ -1974,14 +2054,102 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                             ],
                           ),
                         ),
-                        ElevatedButton.icon(
-                          onPressed: () => _sendConnectRequest(guidId, handle),
-                          icon: const Icon(Icons.person_add_alt_1, size: 18),
-                          label: const Text('Connect'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            textStyle: const TextStyle(fontSize: 13),
-                          ),
+                        Builder(
+                          builder: (context) {
+                            final bool isConnected = item['isConnected'] == true;
+                            final bool hasPendingRequest = item['hasPendingRequest'] == true;
+                            final String? pendingRequestId = item['pendingRequestId']?.toString();
+
+                            dynamic receivedReq;
+                            for (final r in _pendingRequests) {
+                              final rId = r['requestId']?.toString();
+                              final sId = r['senderUserId']?.toString();
+                              final fId = r['fromUserId']?.toString();
+                              if ((pendingRequestId != null && rId == pendingRequestId) ||
+                                  sId == handle || fId == guidId) {
+                                receivedReq = r;
+                                break;
+                              }
+                            }
+
+                            final String? reqIdToUse = pendingRequestId ?? receivedReq?['requestId']?.toString();
+
+                            if (isConnected) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFECFDF5),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF059669)),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Connected',
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            } else if (hasPendingRequest && receivedReq != null) {
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ElevatedButton(
+                                    onPressed: reqIdToUse == null ? null : () => _acceptConnectRequest(reqIdToUse),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF0D9488),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    ),
+                                    child: const Text('Accept', style: TextStyle(fontSize: 13)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  OutlinedButton(
+                                    onPressed: reqIdToUse == null ? null : () => _declineConnectRequest(reqIdToUse),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      foregroundColor: const Color(0xFFE11D48),
+                                      side: const BorderSide(color: Color(0xFFFECDD3)),
+                                    ),
+                                    child: const Text('Decline', style: TextStyle(fontSize: 13)),
+                                  ),
+                                ],
+                              );
+                            } else if (hasPendingRequest || _sentRequests.any((r) => r['toUserId'] == guidId)) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(Icons.outbox_outlined, size: 16, color: Color(0xFF64748B)),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Request Sent',
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            } else {
+                              return ElevatedButton.icon(
+                                onPressed: () => _sendConnectRequest(guidId, handle),
+                                icon: const Icon(Icons.person_add_alt_1, size: 18),
+                                label: const Text('Send Request'),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                  textStyle: const TextStyle(fontSize: 13),
+                                ),
+                              );
+                            }
+                          },
                         ),
                       ],
                     ),
@@ -1993,13 +2161,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             const Divider(),
             const SizedBox(height: 16),
           ],
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Connected Contacts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-              IconButton(icon: const Icon(Icons.refresh, size: 20), onPressed: _fetchConnections),
-            ],
-          ),
+          const Text('Connected Contacts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
           const SizedBox(height: 12),
           if (_connections.isEmpty)
             Container(
@@ -2028,8 +2190,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
                 final conn = _connections[index];
-                final targetGuidId = conn['connectedUserId'];
-                final handle = conn['userId'] ?? 'Contact';
+                final targetGuidId = conn['contactId'] ?? conn['connectedUserId'];
+                final handle = conn['contactUserId'] ?? conn['userId'] ?? 'Contact';
                 final presence = conn['presenceStatus'] ?? 'Offline';
                 final isOnline = presence.toString().toLowerCase() == 'online';
 
@@ -2087,18 +2249,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('Connect Requests', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                  SizedBox(height: 4),
-                  Text('Manage incoming and outgoing connection requests', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-                ],
-              ),
-              IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchPendingRequests),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text('Connect Requests', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+              SizedBox(height: 4),
+              Text('Manage incoming and outgoing connection requests', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
             ],
           ),
           const SizedBox(height: 20),
@@ -2161,13 +2317,28 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                     ],
                                   ),
                                 ),
-                                ElevatedButton(
-                                  onPressed: () => _acceptConnectRequest(reqId),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0D9488),
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                  ),
-                                  child: const Text('Accept'),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ElevatedButton(
+                                      onPressed: () => _acceptConnectRequest(reqId),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF0D9488),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      ),
+                                      child: const Text('Accept'),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    OutlinedButton(
+                                      onPressed: () => _declineConnectRequest(reqId),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        foregroundColor: const Color(0xFFE11D48),
+                                        side: const BorderSide(color: Color(0xFFFECDD3)),
+                                      ),
+                                      child: const Text('Decline'),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -2293,8 +2464,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
                 final conn = _connections[index];
-                final targetGuidId = conn['connectedUserId'];
-                final handle = conn['userId'] ?? 'User';
+                final targetGuidId = conn['contactId'] ?? conn['connectedUserId'];
+                final handle = conn['contactUserId'] ?? conn['userId'] ?? 'User';
 
                 return Card(
                   child: ListTile(
@@ -2499,18 +2670,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('Call History', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                  SizedBox(height: 4),
-                  Text('Recent voice call logs and status', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-                ],
-              ),
-              IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchCallHistory),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text('Call History', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+              SizedBox(height: 4),
+              Text('Recent voice call logs and status', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
             ],
           ),
           const SizedBox(height: 20),
@@ -2608,13 +2773,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Blocked Users', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                      IconButton(icon: const Icon(Icons.refresh, size: 18), onPressed: _fetchBlockedUsers),
-                    ],
-                  ),
+                  const Text('Blocked Users', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                   const SizedBox(height: 10),
                   if (_blockedUsers.isEmpty)
                     Container(
@@ -2644,8 +2803,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final b = _blockedUsers[index];
-                        final id = b['blockedUserId'];
-                        final handle = b['userId'] ?? 'Blocked User';
+                        final id = b['userId'] ?? b['blockedUserId'];
+                        final handle = b['handle'] ?? b['userId'] ?? 'Blocked User';
 
                         return Card(
                           child: ListTile(
