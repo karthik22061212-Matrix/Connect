@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.13" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.13" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.13" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -22,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Connect.Api\Connect.Api.csproj" />
     <ProjectReference Include="..\..\src\Connect.Application\Connect.Application.csproj" />
     <ProjectReference Include="..\..\src\Connect.Domain\Connect.Domain.csproj" />
     <ProjectReference Include="..\..\src\Connect.Infrastructure\Connect.Infrastructure.csproj" />
