@@ -65,8 +65,8 @@ public class SendConnectRequestCommandHandler : IRequestHandler<SendConnectReque
         // Check if pending connect request already exists
         var hasPendingRequest = await _unitOfWork.ConnectRequests.AnyAsync(r =>
             r.Status == ConnectRequestStatus.Pending &&
-            ((r.FromUserId == fromUserId && r.ToUserId == toUserId) ||
-             (r.FromUserId == toUserId && r.ToUserId == fromUserId)), cancellationToken);
+            r.CanonicalUserAId == userAId &&
+            r.CanonicalUserBId == userBId, cancellationToken);
 
         if (hasPendingRequest)
         {
@@ -82,6 +82,7 @@ public class SendConnectRequestCommandHandler : IRequestHandler<SendConnectReque
             CreatedAt = _dateTimeProvider.UtcNow,
             UpdatedAt = _dateTimeProvider.UtcNow
         };
+        connectRequest.SetCanonicalUserIds();
 
         _unitOfWork.ConnectRequests.Add(connectRequest);
         try
