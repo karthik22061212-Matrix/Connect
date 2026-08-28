@@ -102,7 +102,29 @@ public class RefreshTokenService : IRefreshTokenService
         existingToken.ReplacedByTokenId = newToken.Id;
 
         _context.RefreshTokens.Add(newToken);
-        await _context.SaveChangesAsync(ct);
+
+        try
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _context.RefreshTokens.Entry(newToken).State = EntityState.Detached;
+            _context.RefreshTokens.Entry(existingToken).State = EntityState.Detached;
+
+            var activeTokens = await _context.RefreshTokens
+                .Where(rt => rt.UserId == existingToken.UserId && rt.RevokedAt == null)
+                .ToListAsync(ct);
+
+            var revokeNow = DateTime.UtcNow;
+            foreach (var token in activeTokens)
+            {
+                token.RevokedAt = revokeNow;
+            }
+
+            await _context.SaveChangesAsync(ct);
+            throw new UnauthorizedAccessException("Refresh token reuse detected. All sessions revoked for security.");
+        }
 
         return (newPlaintextToken, existingToken.User);
     }
