@@ -3,48 +3,23 @@ using System.Security.Claims;
 using System.Text;
 using Connect.Application.Common.Interfaces;
 using Connect.Domain.Entities;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Connect.Infrastructure.Identity;
 
 public class JwtTokenGenerator : IJwtTokenGenerator
 {
-    private readonly IConfiguration _configuration;
+    private readonly JwtSettings _jwtSettings;
 
-    public JwtTokenGenerator(IConfiguration configuration)
+    public JwtTokenGenerator(IOptions<JwtSettings> jwtSettings)
     {
-        _configuration = configuration;
+        _jwtSettings = jwtSettings.Value;
     }
 
     public string GenerateToken(User user)
     {
-        var secret = _configuration["JwtSettings:Secret"];
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            secret = "SuperSecretKeyForConnectAppJwtTokenGeneration2026!";
-        }
-
-        var issuer = _configuration["JwtSettings:Issuer"];
-        if (string.IsNullOrWhiteSpace(issuer))
-        {
-            issuer = "ConnectApi";
-        }
-
-        var audience = _configuration["JwtSettings:Audience"];
-        if (string.IsNullOrWhiteSpace(audience))
-        {
-            audience = "ConnectClient";
-        }
-
-        var expiryMinutesStr = _configuration["JwtSettings:ExpiryMinutes"];
-        if (string.IsNullOrWhiteSpace(expiryMinutesStr))
-        {
-            expiryMinutesStr = "60";
-        }
-        var expiryMinutes = double.TryParse(expiryMinutesStr, out var exp) ? exp : 60;
-
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
@@ -57,10 +32,10 @@ public class JwtTokenGenerator : IJwtTokenGenerator
         };
 
         var token = new JwtSecurityToken(
-            issuer: issuer,
-            audience: audience,
+            issuer: _jwtSettings.Issuer,
+            audience: _jwtSettings.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
+            expires: DateTime.UtcNow.AddMinutes(_jwtSettings.ExpiryMinutes),
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
