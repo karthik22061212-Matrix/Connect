@@ -9,6 +9,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Connect.Infrastructure.Realtime;
 
@@ -20,19 +21,22 @@ public class CallHub : Hub<ICallHubClient>
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly ISender _mediator;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly ILogger<CallHub> _logger;
 
     public CallHub(
         IPresenceTracker presenceTracker,
         IUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
         ISender mediator,
-        IServiceScopeFactory serviceScopeFactory)
+        IServiceScopeFactory serviceScopeFactory,
+        ILogger<CallHub> logger)
     {
         _presenceTracker = presenceTracker;
         _unitOfWork = unitOfWork;
         _dateTimeProvider = dateTimeProvider;
         _mediator = mediator;
         _serviceScopeFactory = serviceScopeFactory;
+        _logger = logger;
     }
 
     public override async Task OnConnectedAsync()
@@ -230,6 +234,8 @@ public class CallHub : Hub<ICallHubClient>
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
+        EnsureCallParticipant(call, userId);
+
         var targetUserId = call.CallerId == userId ? call.CalleeId : call.CallerId;
         var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(targetUserId);
         await Clients.Clients(targetConnections).ReceiveWebRtcOffer(callId, sdp);
@@ -240,6 +246,8 @@ public class CallHub : Hub<ICallHubClient>
         var userId = GetUserId();
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
+
+        EnsureCallParticipant(call, userId);
 
         var targetUserId = call.CallerId == userId ? call.CalleeId : call.CallerId;
         var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(targetUserId);
@@ -252,9 +260,20 @@ public class CallHub : Hub<ICallHubClient>
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
+        EnsureCallParticipant(call, userId);
+
         var targetUserId = call.CallerId == userId ? call.CalleeId : call.CallerId;
         var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(targetUserId);
         await Clients.Clients(targetConnections).ReceiveIceCandidate(callId, candidate);
+    }
+
+    private void EnsureCallParticipant(Call call, Guid userId)
+    {
+        if (call.CallerId != userId && call.CalleeId != userId)
+        {
+            _logger.LogWarning("Unauthorized WebRTC operation attempt: User {UserId} is not a participant in Call {CallId}.", userId, call.Id);
+            throw new HubException("Unauthorized call access.");
+        }
     }
 
     public async Task NotifyNetworkDrop(Guid callId)
