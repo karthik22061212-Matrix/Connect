@@ -45,6 +45,8 @@ public class FailCallCommandHandler : IRequestHandler<FailCallCommand, FailCallR
         call.MissedReason = request.Reason;
         call.EndedAt = now;
         call.UpdatedAt = now;
+        call.TimeoutDeadline = null;
+        call.TimeoutType = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

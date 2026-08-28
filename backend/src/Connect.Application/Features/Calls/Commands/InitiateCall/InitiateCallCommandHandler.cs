@@ -132,6 +132,8 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
             CallerId = callerId,
             CalleeId = request.CalleeId,
             Status = CallStatus.Ringing,
+            TimeoutDeadline = _dateTimeProvider.UtcNow.AddSeconds(15),
+            TimeoutType = CallTimeoutType.Ring,
             StartedAt = _dateTimeProvider.UtcNow,
             CreatedAt = _dateTimeProvider.UtcNow,
             UpdatedAt = _dateTimeProvider.UtcNow

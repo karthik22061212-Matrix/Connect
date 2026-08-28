@@ -20,4 +20,6 @@ public class Call : AuditableEntity
     public DateTime? AnsweredAt { get; set; }
     public DateTime? EndedAt { get; set; }
     public int? DurationSeconds { get; set; }
+    public DateTime? TimeoutDeadline { get; set; }
+    public CallTimeoutType? TimeoutType { get; set; }
 }

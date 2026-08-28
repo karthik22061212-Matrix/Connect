@@ -46,10 +46,12 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IPushNotificationService, Notifications.FcmPushNotificationService>();
+        services.AddScoped<ICallTimeoutProcessor, CallTimeoutProcessor>();
 
         services.AddHostedService<CallHistoryPurgeBackgroundService>();
         services.AddHostedService<ExpiredAccountsPurgeBackgroundService>();
         services.AddHostedService<ExpiredRefreshTokensPurgeBackgroundService>();
+        services.AddHostedService<CallTimeoutBackgroundService>();
 
         services.AddSignalR();
 

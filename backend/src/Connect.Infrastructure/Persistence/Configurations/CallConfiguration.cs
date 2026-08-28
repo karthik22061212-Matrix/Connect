@@ -17,8 +17,12 @@ public class CallConfiguration : IEntityTypeConfiguration<Call>
         builder.Property(c => c.MissedReason)
             .HasConversion<byte>();
 
+        builder.Property(c => c.TimeoutType)
+            .HasConversion<byte>();
+
         builder.HasIndex(c => new { c.CallerId, c.StartedAt });
         builder.HasIndex(c => new { c.CalleeId, c.StartedAt });
+        builder.HasIndex(c => new { c.TimeoutDeadline, c.TimeoutType });
 
         builder.HasOne(c => c.Connection)
             .WithMany(conn => conn.Calls)
