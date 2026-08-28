@@ -9,13 +9,11 @@ using Serilog;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configure Serilog logging to console
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
     .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .CreateLogger();
-
-builder.Host.UseSerilog();
+    .WriteTo.Console());
 
 // 2. Add services to the container
 builder.Services.AddApplication();
@@ -80,15 +78,10 @@ builder.Services.AddCors(options =>
         policy.SetIsOriginAllowed(origin =>
               {
                   if (string.IsNullOrWhiteSpace(origin)) return false;
-                  if (allowedOrigins.Contains(origin)) return true;
-                  if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-                  {
-                      return uri.Host == "localhost" || uri.Host == "127.0.0.1";
-                  }
-                  return false;
+                  return allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
               })
               .AllowAnyHeader()
-              .AllowAnyMethod()
+              .WithMethods("GET", "POST", "PUT", "DELETE")
               .AllowCredentials();
     });
 });
@@ -104,7 +97,7 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-if (app.Environment.IsDevelopment() || true)
+if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Connect API v1"));
@@ -122,7 +115,6 @@ catch (Exception ex)
 {
     Log.Fatal(ex, "Connect API terminated unexpectedly");
 }
-finally
-{
-    Log.CloseAndFlush();
-}
+
+public partial class Program { }
+
