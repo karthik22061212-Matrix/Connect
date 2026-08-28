@@ -15,7 +15,7 @@ public class ConnectRequestConfiguration : IEntityTypeConfiguration<ConnectReque
             .HasConversion<byte>()
             .IsRequired();
 
-        builder.HasIndex(cr => new { cr.FromUserId, cr.ToUserId })
+        builder.HasIndex(cr => new { cr.CanonicalUserAId, cr.CanonicalUserBId })
             .IsUnique()
             .HasFilter("[Status] = 0");
 

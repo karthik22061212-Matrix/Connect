@@ -2,6 +2,7 @@ using Connect.Application.Common.Exceptions;
 using Connect.Application.Common.Interfaces;
 using Connect.Application.Features.Blocking.Commands.BlockUser;
 using Connect.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace Connect.Application.UnitTests.Blocking;
@@ -54,5 +55,22 @@ public class BlockUserCommandHandlerTests
         Assert.True(result);
         _blockRepoMock.Verify(r => r.Add(It.Is<Block>(b => b.BlockerUserId == _userId && b.BlockedUserId == _targetUserId)), Times.Once);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_DbUpdateException_ThrowsConflictException()
+    {
+        var targetUser = new User { Id = _targetUserId, UserId = "target" };
+        _userRepoMock.Setup(r => r.GetByIdAsync(_targetUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(targetUser);
+
+        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        _unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("Unique index constraint violation"));
+
+        var command = new BlockUserCommand(_targetUserId);
+        await Assert.ThrowsAsync<ConflictException>(() => _handler.Handle(command, CancellationToken.None));
     }
 }

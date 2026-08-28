@@ -2,6 +2,7 @@ using Connect.Application.Common.Exceptions;
 using Connect.Application.Common.Interfaces;
 using Connect.Domain.Entities;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Connect.Application.Features.Blocking.Commands.BlockUser;
 
@@ -57,7 +58,14 @@ public class BlockUserCommandHandler : IRequestHandler<BlockUserCommand, bool>
         };
 
         _unitOfWork.Blocks.Add(block);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            throw new ConflictException("User is already blocked.");
+        }
 
         return true;
     }
