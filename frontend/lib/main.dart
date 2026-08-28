@@ -275,6 +275,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _user1Session = null;
       _user2Session = null;
       _isHubConnected = false;
+      _authSuccessMessage = null;
+      _authErrorMessage = null;
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -296,6 +298,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _user2Session = null;
       }
       _isHubConnected = false;
+      _authSuccessMessage = 'Logged out successfully.';
+      _authErrorMessage = null;
     });
     _log('Logged out and cleared localStorage session');
   }
@@ -968,7 +972,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   Future<void> _acceptConnectRequest(String requestId) async {
     final session = currentSession;
-    if (session == null) return;
+    if (session == null || requestId.isEmpty || requestId == 'null') return;
 
     try {
       final res = await http.post(
@@ -996,9 +1000,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('Accept Request Exception: $e');
     }
   }
+
   Future<void> _declineConnectRequest(String requestId) async {
     final session = currentSession;
-    if (session == null) return;
+    if (session == null || requestId.isEmpty || requestId == 'null') return;
 
     try {
       final res = await http.post(
@@ -2060,10 +2065,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                             final bool hasPendingRequest = item['hasPendingRequest'] == true;
                             final String? pendingRequestId = item['pendingRequestId']?.toString();
 
-                            dynamic receivedReq;
+                             dynamic receivedReq;
                             for (final r in _pendingRequests) {
-                              final rId = r['requestId']?.toString();
-                              final sId = r['senderUserId']?.toString();
+                              final rId = (r['id'] ?? r['requestId'])?.toString();
+                              final sId = (r['fromUserHandle'] ?? r['senderUserId'])?.toString();
                               final fId = r['fromUserId']?.toString();
                               if ((pendingRequestId != null && rId == pendingRequestId) ||
                                   sId == handle || fId == guidId) {
@@ -2072,7 +2077,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                               }
                             }
 
-                            final String? reqIdToUse = pendingRequestId ?? receivedReq?['requestId']?.toString();
+                            final String? reqIdToUse = pendingRequestId ?? (receivedReq?['id'] ?? receivedReq?['requestId'])?.toString();
 
                             if (isConnected) {
                               return Container(
@@ -2293,8 +2298,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final req = _pendingRequests[index];
-                        final reqId = req['requestId'];
-                        final senderHandle = req['senderUserId'] ?? 'Unknown';
+                        final reqId = (req['id'] ?? req['requestId'])?.toString();
+                        final senderHandle = (req['fromUserHandle'] ?? req['senderUserId'])?.toString() ?? 'Unknown';
 
                         return Card(
                           child: Padding(
@@ -2321,7 +2326,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     ElevatedButton(
-                                      onPressed: () => _acceptConnectRequest(reqId),
+                                      onPressed: reqId == null ? null : () => _acceptConnectRequest(reqId),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: const Color(0xFF0D9488),
                                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -2330,7 +2335,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                     ),
                                     const SizedBox(width: 8),
                                     OutlinedButton(
-                                      onPressed: () => _declineConnectRequest(reqId),
+                                      onPressed: reqId == null ? null : () => _declineConnectRequest(reqId),
                                       style: OutlinedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                         foregroundColor: const Color(0xFFE11D48),
