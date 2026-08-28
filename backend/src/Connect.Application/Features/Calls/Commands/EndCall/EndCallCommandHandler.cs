@@ -3,6 +3,7 @@ using Connect.Application.Common.Interfaces;
 using Connect.Application.Features.Calls.Models;
 using Connect.Domain.Enums;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Connect.Application.Features.Calls.Commands.EndCall;
 
@@ -52,7 +53,27 @@ public class EndCallCommandHandler : IRequestHandler<EndCallCommand, EndCallResu
         call.TimeoutDeadline = null;
         call.TimeoutType = null;
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            var entry = ex.Entries.FirstOrDefault();
+            if (entry != null)
+            {
+                await entry.ReloadAsync(cancellationToken);
+            }
+
+            var otherId = call.CallerId == userId ? call.CalleeId : call.CallerId;
+            return new EndCallResultDto(
+                call.Id,
+                call.CallerId,
+                call.CalleeId,
+                otherId,
+                call.DurationSeconds
+            );
+        }
 
         // Reset presence to Online for both caller and callee
         await _presenceTracker.SetUserPresenceAsync(call.CallerId, PresenceStatus.Online);

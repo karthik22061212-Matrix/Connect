@@ -20,6 +20,9 @@ public class CallConfiguration : IEntityTypeConfiguration<Call>
         builder.Property(c => c.TimeoutType)
             .HasConversion<byte>();
 
+        builder.Property(c => c.RowVersion)
+            .IsRowVersion();
+
         builder.HasIndex(c => new { c.CallerId, c.StartedAt });
         builder.HasIndex(c => new { c.CalleeId, c.StartedAt });
         builder.HasIndex(c => new { c.TimeoutDeadline, c.TimeoutType });

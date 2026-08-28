@@ -10,6 +10,7 @@ using Connect.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Connect.Infrastructure.Realtime;
@@ -154,7 +155,22 @@ public class CallHub : Hub<ICallHubClient>
             call.UpdatedAt = _dateTimeProvider.UtcNow;
             call.TimeoutDeadline = null;
             call.TimeoutType = null;
-            await _unitOfWork.SaveChangesAsync(CancellationToken.None);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                var entry = ex.Entries.FirstOrDefault();
+                if (entry != null)
+                {
+                    await entry.ReloadAsync(CancellationToken.None);
+                }
+                if (call.Status != CallStatus.Accepted)
+                {
+                    return;
+                }
+            }
 
             // Set both users to Busy during active call
             await UpdatePresence(PresenceStatus.Busy);
@@ -170,7 +186,22 @@ public class CallHub : Hub<ICallHubClient>
             call.UpdatedAt = _dateTimeProvider.UtcNow;
             call.TimeoutDeadline = null;
             call.TimeoutType = null;
-            await _unitOfWork.SaveChangesAsync(CancellationToken.None);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                var entry = ex.Entries.FirstOrDefault();
+                if (entry != null)
+                {
+                    await entry.ReloadAsync(CancellationToken.None);
+                }
+                if (call.Status != CallStatus.Rejected)
+                {
+                    return;
+                }
+            }
 
             var callerConnections = await _presenceTracker.GetConnectionIdsForUserAsync(call.CallerId);
             await Clients.Clients(callerConnections).CallRejected(callId);

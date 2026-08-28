@@ -3,6 +3,7 @@ using Connect.Application.Common.Interfaces;
 using Connect.Application.Features.Calls.Models;
 using Connect.Domain.Enums;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Connect.Application.Features.Calls.Commands.FailCall;
 
@@ -48,7 +49,31 @@ public class FailCallCommandHandler : IRequestHandler<FailCallCommand, FailCallR
         call.TimeoutDeadline = null;
         call.TimeoutType = null;
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            var entry = ex.Entries.FirstOrDefault();
+            if (entry != null)
+            {
+                await entry.ReloadAsync(cancellationToken);
+            }
+
+            var otherId = currentUserId.HasValue
+                ? (call.CallerId == currentUserId.Value ? call.CalleeId : call.CallerId)
+                : call.CalleeId;
+
+            return new FailCallResultDto(
+                call.Id,
+                call.CallerId,
+                call.CalleeId,
+                otherId,
+                call.Status,
+                call.MissedReason ?? request.Reason
+            );
+        }
 
         // Reset presence to Online for both caller and callee
         await _presenceTracker.SetUserPresenceAsync(call.CallerId, PresenceStatus.Online);

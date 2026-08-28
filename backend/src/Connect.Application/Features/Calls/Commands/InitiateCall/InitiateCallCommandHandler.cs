@@ -4,6 +4,7 @@ using Connect.Application.Features.Calls.Models;
 using Connect.Domain.Entities;
 using Connect.Domain.Enums;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Connect.Application.Features.Calls.Commands.InitiateCall;
 
@@ -92,7 +93,14 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
             };
 
             _unitOfWork.Calls.Add(call);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return new CallResultDto(call.Id, callerId, request.CalleeId, CallStatus.Missed, MissedReason.Offline, callerUser.UserId);
+            }
 
             await _pushNotificationService.SendMissedCallNotificationAsync(
                 request.CalleeId, call.Id, callerUser.UserId, MissedReason.Offline, cancellationToken);
@@ -116,7 +124,14 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
             };
 
             _unitOfWork.Calls.Add(call);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return new CallResultDto(call.Id, callerId, request.CalleeId, CallStatus.Missed, MissedReason.Busy, callerUser.UserId);
+            }
 
             await _pushNotificationService.SendMissedCallNotificationAsync(
                 request.CalleeId, call.Id, callerUser.UserId, MissedReason.Busy, cancellationToken);
@@ -140,7 +155,14 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
         };
 
         _unitOfWork.Calls.Add(activeCall);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return new CallResultDto(activeCall.Id, callerId, request.CalleeId, CallStatus.Ringing, null, callerUser.UserId);
+        }
 
         await _pushNotificationService.SendIncomingCallNotificationAsync(
             request.CalleeId, activeCall.Id, callerUser.UserId, cancellationToken);

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Connect.Domain.Common;
 using Connect.Domain.Enums;
 
@@ -22,4 +23,7 @@ public class Call : AuditableEntity
     public int? DurationSeconds { get; set; }
     public DateTime? TimeoutDeadline { get; set; }
     public CallTimeoutType? TimeoutType { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }
