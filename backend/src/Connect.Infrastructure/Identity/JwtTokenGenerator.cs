@@ -40,9 +40,9 @@ public class JwtTokenGenerator : IJwtTokenGenerator
         var expiryMinutesStr = _configuration["JwtSettings:ExpiryMinutes"];
         if (string.IsNullOrWhiteSpace(expiryMinutesStr))
         {
-            expiryMinutesStr = "43200";
+            expiryMinutesStr = "60";
         }
-        var expiryMinutes = double.TryParse(expiryMinutesStr, out var exp) ? exp : 43200;
+        var expiryMinutes = double.TryParse(expiryMinutesStr, out var exp) ? exp : 60;
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

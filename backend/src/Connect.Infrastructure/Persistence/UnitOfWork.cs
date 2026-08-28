@@ -15,6 +15,7 @@ public class UnitOfWork : IUnitOfWork
     private IRepository<Block>? _blocks;
     private IRepository<Report>? _reports;
     private IRepository<DeviceToken>? _deviceTokens;
+    private IRepository<RefreshToken>? _refreshTokens;
 
     public UnitOfWork(ApplicationDbContext dbContext)
     {
@@ -28,6 +29,7 @@ public class UnitOfWork : IUnitOfWork
     public IRepository<Block> Blocks => _blocks ??= new Repository<Block>(_dbContext);
     public IRepository<Report> Reports => _reports ??= new Repository<Report>(_dbContext);
     public IRepository<DeviceToken> DeviceTokens => _deviceTokens ??= new Repository<DeviceToken>(_dbContext);
+    public IRepository<RefreshToken> RefreshTokens => _refreshTokens ??= new Repository<RefreshToken>(_dbContext);
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {

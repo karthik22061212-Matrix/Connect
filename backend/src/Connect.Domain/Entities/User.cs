@@ -27,4 +27,5 @@ public class User : AuditableEntity
     public ICollection<Report> ReportsMade { get; set; } = new List<Report>();
     public ICollection<Report> ReportsReceived { get; set; } = new List<Report>();
     public ICollection<DeviceToken> DeviceTokens { get; set; } = new List<DeviceToken>();
+    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

@@ -31,6 +31,10 @@ With the subscription confirmed active and Azure CLI authenticated, resource pro
 - Azure Static Web App (Free tier)
 - Azure B1s VM (for coturn TURN server)
 
+## Step 6: Running & Building Flutter Web App
+- **Local Dev**: `flutter run -d chrome --web-port=8080` (no `--dart-define` needed; defaults to `http://localhost:5200`; port 8080 matches an allowed CORS origin)
+- **Azure/Prod Build**: `flutter build web --dart-define=API_BASE_URL=https://connect-api-5633.azurewebsites.net`
+
 ---
 
 ## Readiness Checklist (Sprint 0 — coding) — ✅ ALL COMPLETE

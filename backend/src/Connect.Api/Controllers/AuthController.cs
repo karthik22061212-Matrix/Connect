@@ -1,4 +1,6 @@
 using Connect.Application.Features.Auth.Commands.Login;
+using Connect.Application.Features.Auth.Commands.Logout;
+using Connect.Application.Features.Auth.Commands.RefreshToken;
 using Connect.Application.Features.Auth.Commands.RegisterUser;
 using Connect.Application.Features.Auth.Models;
 using MediatR;
@@ -34,5 +36,21 @@ public class AuthController : ControllerBase
     {
         var result = await _mediator.Send(command, ct);
         return Ok(result);
+    }
+
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    public async Task<ActionResult<AuthResponseDto>> Refresh([FromBody] RefreshTokenCommand command, CancellationToken ct)
+    {
+        var result = await _mediator.Send(command, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("logout")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Logout([FromBody] LogoutCommand command, CancellationToken ct)
+    {
+        await _mediator.Send(command, ct);
+        return Ok();
     }
 }

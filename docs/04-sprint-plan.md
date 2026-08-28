@@ -25,7 +25,7 @@ Sprint scope can shift based on velocity — this is a starting structure, not a
 |---|---|
 | Azure SQL Database | **SQL Server LocalDB** (Windows dev environment). Same T-SQL dialect as Azure SQL — schema, queries, and EF Core migrations transfer with zero changes in Sprint 7.5 |
 | Azure App Service | Run ASP.NET Core API locally (`dotnet run`) |
-| Azure Static Web Apps | Run Flutter Web locally (`flutter run -d chrome` or local web server) |
+| Azure Static Web Apps | Run Flutter Web locally (`flutter run -d chrome --web-port=8080` or local web server) |
 | coturn TURN server (Azure VM) | Skip for now — use public STUN only for local testing; most local/dev network paths connect fine without TURN. Add TURN when Azure VM is provisioned (Sprint 7.5), since real-world NAT traversal needs it |
 | Firebase Cloud Messaging | No substitute needed — Firebase project setup is free and instant (no card/approval wait like Azure), so this can be created any time from Sprint 0 onward |
 

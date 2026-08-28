@@ -29,8 +29,8 @@ jobs:
       - name: Run unit tests
         run: dotnet test backend/Connect.slnx --no-build --configuration Release --verbosity normal
 
-  analyze-frontend:
-    name: Analyze Frontend (Flutter)
+  build-and-analyze-frontend:
+    name: Build & Analyze Frontend (Flutter Web)
     runs-on: ubuntu-latest
 
     steps:
@@ -51,3 +51,9 @@ jobs:
         run: |
           cd frontend
           flutter analyze
+
+      - name: Build Flutter Web app for deployment
+        run: |
+          cd frontend
+          flutter build web --dart-define=API_BASE_URL=https://connect-api-5633.azurewebsites.net
+

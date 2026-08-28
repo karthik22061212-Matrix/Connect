@@ -9,17 +9,20 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, AuthResponseDto
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _jwtTokenGenerator;
+    private readonly IRefreshTokenService _refreshTokenService;
     private readonly IDateTimeProvider _dateTimeProvider;
 
     public LoginCommandHandler(
         IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator jwtTokenGenerator,
+        IRefreshTokenService refreshTokenService,
         IDateTimeProvider dateTimeProvider)
     {
         _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _jwtTokenGenerator = jwtTokenGenerator;
+        _refreshTokenService = refreshTokenService;
         _dateTimeProvider = dateTimeProvider;
     }
 
@@ -62,13 +65,15 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, AuthResponseDto
         }
 
         var token = _jwtTokenGenerator.GenerateToken(user);
+        var refreshToken = await _refreshTokenService.GenerateRefreshTokenAsync(user.Id, cancellationToken);
 
         return new AuthResponseDto(
             user.Id,
             user.UserId,
             user.Email,
             user.PhoneNumber,
-            token
+            token,
+            refreshToken
         );
     }
 }

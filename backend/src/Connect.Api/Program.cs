@@ -69,7 +69,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// Configure CORS for explicit allowed origins (supporting SignalR credentials)
+// Configure CORS for explicit allowed origins & dynamic local dev ports (supporting SignalR credentials)
 var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
     ?? new[] { "http://localhost:5200", "http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:5200" };
 
@@ -77,7 +77,16 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowedOriginsPolicy", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
+        policy.SetIsOriginAllowed(origin =>
+              {
+                  if (string.IsNullOrWhiteSpace(origin)) return false;
+                  if (allowedOrigins.Contains(origin)) return true;
+                  if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                  {
+                      return uri.Host == "localhost" || uri.Host == "127.0.0.1";
+                  }
+                  return false;
+              })
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();

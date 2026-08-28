@@ -11,5 +11,6 @@ public interface IUnitOfWork
     IRepository<Block> Blocks { get; }
     IRepository<Report> Reports { get; }
     IRepository<DeviceToken> DeviceTokens { get; }
+    IRepository<RefreshToken> RefreshTokens { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

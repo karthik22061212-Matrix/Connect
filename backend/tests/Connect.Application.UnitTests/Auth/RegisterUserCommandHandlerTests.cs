@@ -12,6 +12,7 @@ public class RegisterUserCommandHandlerTests
     private readonly Mock<IRepository<User>> _userRepoMock = new();
     private readonly Mock<IPasswordHasher> _passwordHasherMock = new();
     private readonly Mock<IJwtTokenGenerator> _jwtTokenGeneratorMock = new();
+    private readonly Mock<IRefreshTokenService> _refreshTokenServiceMock = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProviderMock = new();
     private readonly RegisterUserCommandHandler _handler;
 
@@ -21,11 +22,13 @@ public class RegisterUserCommandHandlerTests
         _dateTimeProviderMock.Setup(d => d.UtcNow).Returns(DateTime.UtcNow);
         _passwordHasherMock.Setup(p => p.HashPassword(It.IsAny<User>(), It.IsAny<string>())).Returns("hashed_password");
         _jwtTokenGeneratorMock.Setup(j => j.GenerateToken(It.IsAny<User>())).Returns("valid_jwt_token");
+        _refreshTokenServiceMock.Setup(r => r.GenerateRefreshTokenAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync("valid_refresh_token");
 
         _handler = new RegisterUserCommandHandler(
             _unitOfWorkMock.Object,
             _passwordHasherMock.Object,
             _jwtTokenGeneratorMock.Object,
+            _refreshTokenServiceMock.Object,
             _dateTimeProviderMock.Object);
     }
 

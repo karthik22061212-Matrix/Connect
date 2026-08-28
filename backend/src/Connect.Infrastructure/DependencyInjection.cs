@@ -43,10 +43,12 @@ public static class DependencyInjection
 
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+        services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IPushNotificationService, Notifications.FcmPushNotificationService>();
 
         services.AddHostedService<CallHistoryPurgeBackgroundService>();
         services.AddHostedService<ExpiredAccountsPurgeBackgroundService>();
+        services.AddHostedService<ExpiredRefreshTokensPurgeBackgroundService>();
 
         services.AddSignalR();
 
@@ -77,7 +79,8 @@ public static class DependencyInjection
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = issuer,
                     ValidAudience = audience,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret))
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
+                    ClockSkew = TimeSpan.Zero
                 };
 
                 options.Events = new JwtBearerEvents

@@ -5,5 +5,6 @@ public record AuthResponseDto(
     string UserId,
     string Email,
     string? PhoneNumber,
-    string Token
+    string Token,
+    string RefreshToken
 );
