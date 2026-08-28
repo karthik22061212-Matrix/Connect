@@ -19,6 +19,9 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 
         builder.HasIndex(rt => rt.UserId);
 
+        builder.Property(rt => rt.RevokedAt)
+            .IsConcurrencyToken();
+
         builder.HasOne(rt => rt.User)
             .WithMany(u => u.RefreshTokens)
             .HasForeignKey(rt => rt.UserId)
