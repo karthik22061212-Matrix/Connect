@@ -210,4 +210,37 @@ public class CallHubTests
         _clientsMock.Verify(c => c.Clients(connectionIds), Times.Once);
         _clientProxyMock.Verify(c => c.ReceiveWebRtcAnswer(callId, "test-sdp"), Times.Once);
     }
+
+    [Fact]
+    public async Task SendIceCandidate_WhenUserIsCaller_ForwardsCandidateToCallee()
+    {
+        // Arrange
+        var callerId = Guid.NewGuid();
+        var calleeId = Guid.NewGuid();
+        var callId = Guid.NewGuid();
+
+        var call = new Call
+        {
+            Id = callId,
+            CallerId = callerId,
+            CalleeId = calleeId
+        };
+
+        _callRepositoryMock.Setup(r => r.GetByIdAsync(callId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(call);
+
+        var connectionIds = new List<string> { "conn-callee-1" };
+        _presenceTrackerMock.Setup(p => p.GetConnectionIdsForUserAsync(calleeId))
+            .ReturnsAsync(connectionIds);
+
+        var hub = CreateHubWithAuthenticatedUser(callerId);
+
+        // Act
+        await hub.SendIceCandidate(callId, "test-candidate");
+
+        // Assert
+        _presenceTrackerMock.Verify(p => p.GetConnectionIdsForUserAsync(calleeId), Times.Once);
+        _clientsMock.Verify(c => c.Clients(connectionIds), Times.Once);
+        _clientProxyMock.Verify(c => c.ReceiveIceCandidate(callId, "test-candidate"), Times.Once);
+    }
 }
