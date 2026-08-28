@@ -30,4 +30,9 @@ Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
 
-infra/azure-deployment-info.env
+# Ad-hoc test/debug files
+scratch_*
+*.local.json
+
+# Leftover deploy archives
+*.zip
