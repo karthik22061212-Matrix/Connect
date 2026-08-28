@@ -3,6 +3,7 @@ using Connect.Application.Common.Interfaces;
 using Connect.Application.Features.Calls.Models;
 using Connect.Domain.Enums;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Connect.Application.Features.Calls.Commands.RecordNetworkRestored;
 
@@ -43,7 +44,18 @@ public class RecordNetworkRestoredCommandHandler : IRequestHandler<RecordNetwork
             call.TimeoutDeadline = null;
             call.TimeoutType = null;
             call.UpdatedAt = _dateTimeProvider.UtcNow;
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                var entry = ex.Entries.FirstOrDefault();
+                if (entry != null)
+                {
+                    await entry.ReloadAsync(cancellationToken);
+                }
+            }
         }
 
         var otherUserId = call.CallerId == currentUserId ? call.CalleeId : call.CallerId;

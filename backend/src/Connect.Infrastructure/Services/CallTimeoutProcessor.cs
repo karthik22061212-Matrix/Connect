@@ -2,6 +2,7 @@ using Connect.Application.Common.Interfaces;
 using Connect.Domain.Enums;
 using Connect.Infrastructure.Realtime;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Connect.Infrastructure.Services;
@@ -53,7 +54,25 @@ public class CallTimeoutProcessor : ICallTimeoutProcessor
                     call.TimeoutDeadline = null;
                     call.TimeoutType = null;
 
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    try
+                    {
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateConcurrencyException ex)
+                    {
+                        _logger.LogWarning(ex, "Concurrency conflict processing Ring timeout for Call {CallId}. Reloading entity.", call.Id);
+                        var entry = ex.Entries.FirstOrDefault();
+                        if (entry != null)
+                        {
+                            await entry.ReloadAsync(cancellationToken);
+                        }
+
+                        if (call.Status != CallStatus.Ringing)
+                        {
+                            _logger.LogInformation("Call {CallId} status changed to {Status} concurrently; Ring timeout is moot.", call.Id, call.Status);
+                            continue;
+                        }
+                    }
 
                     var callerConn = await _presenceTracker.GetConnectionIdsForUserAsync(call.CallerId);
                     var calleeConn = await _presenceTracker.GetConnectionIdsForUserAsync(call.CalleeId);
@@ -79,7 +98,14 @@ public class CallTimeoutProcessor : ICallTimeoutProcessor
                     // Call was accepted, rejected, or completed before deadline, clear deadline
                     call.TimeoutDeadline = null;
                     call.TimeoutType = null;
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    try
+                    {
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateConcurrencyException)
+                    {
+                        // Concurrency conflict clearing deadline; safely ignore
+                    }
                 }
             }
             else if (call.TimeoutType == CallTimeoutType.Reconnect)
@@ -111,7 +137,25 @@ public class CallTimeoutProcessor : ICallTimeoutProcessor
                         calleeUser.UpdatedAt = now;
                     }
 
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    try
+                    {
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateConcurrencyException ex)
+                    {
+                        _logger.LogWarning(ex, "Concurrency conflict processing Reconnect timeout for Call {CallId}. Reloading entity.", call.Id);
+                        var entry = ex.Entries.FirstOrDefault();
+                        if (entry != null)
+                        {
+                            await entry.ReloadAsync(cancellationToken);
+                        }
+
+                        if (call.Status != CallStatus.Accepted && call.Status != CallStatus.Ringing)
+                        {
+                            _logger.LogInformation("Call {CallId} status changed to {Status} concurrently; Reconnect timeout is moot.", call.Id, call.Status);
+                            continue;
+                        }
+                    }
 
                     var callerConn = await _presenceTracker.GetConnectionIdsForUserAsync(call.CallerId);
                     var calleeConn = await _presenceTracker.GetConnectionIdsForUserAsync(call.CalleeId);
@@ -128,7 +172,14 @@ public class CallTimeoutProcessor : ICallTimeoutProcessor
                     // Call is no longer active, clear deadline
                     call.TimeoutDeadline = null;
                     call.TimeoutType = null;
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    try
+                    {
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateConcurrencyException)
+                    {
+                        // Concurrency conflict clearing deadline; safely ignore
+                    }
                 }
             }
         }
