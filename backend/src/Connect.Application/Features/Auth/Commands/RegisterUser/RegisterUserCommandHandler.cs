@@ -31,22 +31,25 @@ public class RegisterUserCommandHandler : IRequestHandler<RegisterUserCommand, A
 
     public async Task<AuthResponseDto> Handle(RegisterUserCommand request, CancellationToken cancellationToken)
     {
-        var users = await _unitOfWork.Users.ListAsync(cancellationToken);
-
-        if (users.Any(u => u.UserId.Equals(request.UserId, StringComparison.OrdinalIgnoreCase)))
+        var userIdLower = request.UserId.ToLower();
+        if (await _unitOfWork.Users.AnyAsync(u => !u.IsDeleted && u.UserId.ToLower() == userIdLower, cancellationToken))
         {
             throw new ConflictException($"User ID '{request.UserId}' is already taken.");
         }
 
-        if (users.Any(u => u.Email.Equals(request.Email, StringComparison.OrdinalIgnoreCase)))
+        var emailLower = request.Email.ToLower();
+        if (await _unitOfWork.Users.AnyAsync(u => !u.IsDeleted && u.Email.ToLower() == emailLower, cancellationToken))
         {
             throw new ConflictException($"Email '{request.Email}' is already registered.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.PhoneNumber) &&
-            users.Any(u => u.PhoneNumber != null && u.PhoneNumber.Equals(request.PhoneNumber, StringComparison.OrdinalIgnoreCase)))
+        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
         {
-            throw new ConflictException("Phone number is already registered.");
+            var phoneLower = request.PhoneNumber.ToLower();
+            if (await _unitOfWork.Users.AnyAsync(u => !u.IsDeleted && u.PhoneNumber != null && u.PhoneNumber.ToLower() == phoneLower, cancellationToken))
+            {
+                throw new ConflictException("Phone number is already registered.");
+            }
         }
 
         var user = new User

@@ -45,8 +45,8 @@ public class BlockUserCommandHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(_targetUserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetUser);
 
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Block>());
+        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         var command = new BlockUserCommand(_targetUserId);
         var result = await _handler.Handle(command, CancellationToken.None);

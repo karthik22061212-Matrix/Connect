@@ -46,10 +46,10 @@ public class AcceptConnectRequestCommandHandlerTests
             Status = ConnectRequestStatus.Pending
         };
 
-        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ConnectRequest> { request });
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Connection>());
+        _requestRepoMock.Setup(r => r.GetByIdAsync(_requestId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(request);
+        _connectionRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Connection, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Connection?)null);
 
         var command = new AcceptConnectRequestCommand(_requestId);
 
@@ -80,8 +80,8 @@ public class AcceptConnectRequestCommandHandlerTests
             Status = ConnectRequestStatus.Pending
         };
 
-        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ConnectRequest> { request });
+        _requestRepoMock.Setup(r => r.GetByIdAsync(_requestId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(request);
 
         var command = new AcceptConnectRequestCommand(_requestId);
 

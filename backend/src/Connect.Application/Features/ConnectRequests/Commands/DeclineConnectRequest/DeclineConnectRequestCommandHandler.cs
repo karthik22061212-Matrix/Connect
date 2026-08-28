@@ -27,8 +27,7 @@ public class DeclineConnectRequestCommandHandler : IRequestHandler<DeclineConnec
         var currentUserId = _currentUserService.UserId
             ?? throw new UnauthorizedAccessException("User is not authenticated.");
 
-        var connectRequests = await _unitOfWork.ConnectRequests.ListAsync(cancellationToken);
-        var connectReq = connectRequests.FirstOrDefault(r => r.Id == request.RequestId);
+        var connectReq = await _unitOfWork.ConnectRequests.GetByIdAsync(request.RequestId, cancellationToken);
 
         if (connectReq == null)
         {

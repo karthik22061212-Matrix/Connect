@@ -31,8 +31,8 @@ public class RegisterDeviceTokenCommandHandlerTests
     [Fact]
     public async Task Handle_NewToken_AddsDeviceToken()
     {
-        _deviceTokenRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DeviceToken>());
+        _deviceTokenRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<DeviceToken, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DeviceToken?)null);
 
         var command = new RegisterDeviceTokenCommand("fcm_token_123", DevicePlatform.Web);
         var result = await _handler.Handle(command, CancellationToken.None);

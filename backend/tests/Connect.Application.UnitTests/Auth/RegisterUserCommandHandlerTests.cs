@@ -36,8 +36,8 @@ public class RegisterUserCommandHandlerTests
     public async Task Handle_ValidRequest_RegistersUserAndReturnsToken()
     {
         // Arrange
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User>());
+        _userRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         var command = new RegisterUserCommand("john_doe", "john@example.com", "Password123!");
 
@@ -58,9 +58,8 @@ public class RegisterUserCommandHandlerTests
     public async Task Handle_DuplicateUserId_ThrowsConflictException()
     {
         // Arrange
-        var existingUser = new User { UserId = "john_doe", Email = "other@example.com" };
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { existingUser });
+        _userRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var command = new RegisterUserCommand("JOHN_DOE", "john@example.com", "Password123!");
 

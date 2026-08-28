@@ -33,8 +33,8 @@ public class InitiateCallCommandHandlerTests
         _currentUserServiceMock.Setup(c => c.UserId).Returns(_callerId);
         _dateTimeProviderMock.Setup(d => d.UtcNow).Returns(DateTime.UtcNow);
 
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Block>());
+        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         _handler = new InitiateCallCommandHandler(
             _unitOfWorkMock.Object,
@@ -101,12 +101,8 @@ public class InitiateCallCommandHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(callee);
 
-        var blocks = new List<Block>
-        {
-            new Block { BlockerUserId = _calleeId, BlockedUserId = _callerId }
-        };
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(blocks);
+        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var command = new InitiateCallCommand(_calleeId);
 
@@ -125,8 +121,8 @@ public class InitiateCallCommandHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(callee);
 
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Connection>());
+        _connectionRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Connection, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Connection?)null);
 
         var command = new InitiateCallCommand(_calleeId);
 
@@ -205,12 +201,9 @@ public class InitiateCallCommandHandlerTests
         var minId = _callerId.CompareTo(_calleeId) < 0 ? _callerId : _calleeId;
         var maxId = _callerId.CompareTo(_calleeId) < 0 ? _calleeId : _callerId;
 
-        var connections = new List<Connection>
-        {
-            new Connection { Id = Guid.NewGuid(), UserAId = minId, UserBId = maxId }
-        };
+        var connection = new Connection { Id = Guid.NewGuid(), UserAId = minId, UserBId = maxId };
 
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(connections);
+        _connectionRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Connection, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(connection);
     }
 }

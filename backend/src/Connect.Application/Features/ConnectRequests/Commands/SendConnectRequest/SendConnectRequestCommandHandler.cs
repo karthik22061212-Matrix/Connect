@@ -36,19 +36,17 @@ public class SendConnectRequestCommandHandler : IRequestHandler<SendConnectReque
             throw new ConflictException("Cannot send a connect request to yourself.");
         }
 
-        var users = await _unitOfWork.Users.ListAsync(cancellationToken);
-        var targetUser = users.FirstOrDefault(u => u.Id == toUserId && !u.IsDeleted);
+        var targetUser = await _unitOfWork.Users.GetByIdAsync(toUserId, cancellationToken);
 
-        if (targetUser == null)
+        if (targetUser == null || targetUser.IsDeleted)
         {
             throw new NotFoundException("Target user not found.");
         }
 
         // Check if blocked
-        var blocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
-        var isBlocked = blocks.Any(b =>
+        var isBlocked = await _unitOfWork.Blocks.AnyAsync(b =>
             (b.BlockerUserId == fromUserId && b.BlockedUserId == toUserId) ||
-            (b.BlockerUserId == toUserId && b.BlockedUserId == fromUserId));
+            (b.BlockerUserId == toUserId && b.BlockedUserId == fromUserId), cancellationToken);
 
         if (isBlocked)
         {
@@ -59,18 +57,18 @@ public class SendConnectRequestCommandHandler : IRequestHandler<SendConnectReque
         var userAId = fromUserId.CompareTo(toUserId) < 0 ? fromUserId : toUserId;
         var userBId = fromUserId.CompareTo(toUserId) < 0 ? toUserId : fromUserId;
 
-        var connections = await _unitOfWork.Connections.ListAsync(cancellationToken);
-        if (connections.Any(c => c.UserAId == userAId && c.UserBId == userBId))
+        if (await _unitOfWork.Connections.AnyAsync(c => c.UserAId == userAId && c.UserBId == userBId, cancellationToken))
         {
             throw new ConflictException("You are already connected with this user.");
         }
 
         // Check if pending connect request already exists
-        var existingRequests = await _unitOfWork.ConnectRequests.ListAsync(cancellationToken);
-        if (existingRequests.Any(r =>
+        var hasPendingRequest = await _unitOfWork.ConnectRequests.AnyAsync(r =>
             r.Status == ConnectRequestStatus.Pending &&
             ((r.FromUserId == fromUserId && r.ToUserId == toUserId) ||
-             (r.FromUserId == toUserId && r.ToUserId == fromUserId))))
+             (r.FromUserId == toUserId && r.ToUserId == fromUserId)), cancellationToken);
+
+        if (hasPendingRequest)
         {
             throw new ConflictException("A pending connect request already exists.");
         }

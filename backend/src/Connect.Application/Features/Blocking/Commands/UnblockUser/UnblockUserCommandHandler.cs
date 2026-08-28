@@ -25,8 +25,8 @@ public class UnblockUserCommandHandler : IRequestHandler<UnblockUserCommand, boo
             throw new UnauthorizedAccessException("User is not authenticated.");
         }
 
-        var blocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
-        var block = blocks.FirstOrDefault(b => b.BlockerUserId == currentUserId.Value && b.BlockedUserId == request.UserIdToUnblock);
+        var block = await _unitOfWork.Blocks.FirstOrDefaultAsync(
+            b => b.BlockerUserId == currentUserId.Value && b.BlockedUserId == request.UserIdToUnblock, cancellationToken);
 
         if (block == null)
         {

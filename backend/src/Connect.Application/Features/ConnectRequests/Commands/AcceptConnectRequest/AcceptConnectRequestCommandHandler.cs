@@ -29,8 +29,7 @@ public class AcceptConnectRequestCommandHandler : IRequestHandler<AcceptConnectR
         var currentUserId = _currentUserService.UserId
             ?? throw new UnauthorizedAccessException("User is not authenticated.");
 
-        var connectRequests = await _unitOfWork.ConnectRequests.ListAsync(cancellationToken);
-        var connectReq = connectRequests.FirstOrDefault(r => r.Id == request.RequestId);
+        var connectReq = await _unitOfWork.ConnectRequests.GetByIdAsync(request.RequestId, cancellationToken);
 
         if (connectReq == null)
         {
@@ -55,8 +54,8 @@ public class AcceptConnectRequestCommandHandler : IRequestHandler<AcceptConnectR
         var userAId = connectReq.FromUserId.CompareTo(connectReq.ToUserId) < 0 ? connectReq.FromUserId : connectReq.ToUserId;
         var userBId = connectReq.FromUserId.CompareTo(connectReq.ToUserId) < 0 ? connectReq.ToUserId : connectReq.FromUserId;
 
-        var connections = await _unitOfWork.Connections.ListAsync(cancellationToken);
-        var existingConnection = connections.FirstOrDefault(c => c.UserAId == userAId && c.UserBId == userBId);
+        var existingConnection = await _unitOfWork.Connections.FirstOrDefaultAsync(
+            c => c.UserAId == userAId && c.UserBId == userBId, cancellationToken);
 
         if (existingConnection == null)
         {

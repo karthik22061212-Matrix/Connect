@@ -42,8 +42,8 @@ public class LoginCommandHandlerTests
             PasswordHash = "hashed_password"
         };
 
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { user });
+        _userRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
 
         _passwordHasherMock.Setup(p => p.VerifyPassword(user, "hashed_password", "Password123!"))
             .Returns(true);
@@ -70,8 +70,8 @@ public class LoginCommandHandlerTests
             PasswordHash = "hashed_password"
         };
 
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { user });
+        _userRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
 
         _passwordHasherMock.Setup(p => p.VerifyPassword(user, "hashed_password", "WrongPassword"))
             .Returns(false);
@@ -98,8 +98,8 @@ public class LoginCommandHandlerTests
             ReactivationDeadline = now.AddDays(50)
         };
 
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { user });
+        _userRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
 
         _passwordHasherMock.Setup(p => p.VerifyPassword(user, "hashed_password", "Password123!"))
             .Returns(true);
@@ -133,8 +133,8 @@ public class LoginCommandHandlerTests
             ReactivationDeadline = now.AddDays(-10)
         };
 
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { user });
+        _userRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
 
         _passwordHasherMock.Setup(p => p.VerifyPassword(user, "hashed_password", "Password123!"))
             .Returns(true);

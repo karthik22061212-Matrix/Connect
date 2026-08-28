@@ -21,8 +21,8 @@ public class CheckUserIdAvailabilityQueryHandlerTests
     public async Task Handle_AvailableUserId_ReturnsIsAvailableTrue()
     {
         // Arrange
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User>());
+        _userRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         var query = new CheckUserIdAvailabilityQuery("new_user");
 
@@ -38,8 +38,8 @@ public class CheckUserIdAvailabilityQueryHandlerTests
     public async Task Handle_TakenUserId_ReturnsIsAvailableFalse()
     {
         // Arrange
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { new User { UserId = "existing_user" } });
+        _userRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var query = new CheckUserIdAvailabilityQuery("EXISTING_USER");
 

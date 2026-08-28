@@ -28,8 +28,7 @@ public class RegisterDeviceTokenCommandHandler : IRequestHandler<RegisterDeviceT
             throw new UnauthorizedAccessException("User is not authenticated.");
         }
 
-        var existingTokens = await _unitOfWork.DeviceTokens.ListAsync(cancellationToken);
-        var deviceToken = existingTokens.FirstOrDefault(t => t.Token == request.Token);
+        var deviceToken = await _unitOfWork.DeviceTokens.FirstOrDefaultAsync(t => t.Token == request.Token, cancellationToken);
 
         var now = _dateTimeProvider.UtcNow;
 

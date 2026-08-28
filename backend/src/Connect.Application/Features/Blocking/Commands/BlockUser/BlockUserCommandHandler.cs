@@ -40,8 +40,8 @@ public class BlockUserCommandHandler : IRequestHandler<BlockUserCommand, bool>
             throw new NotFoundException("User to block not found.");
         }
 
-        var existingBlocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
-        var alreadyBlocked = existingBlocks.Any(b => b.BlockerUserId == currentUserId.Value && b.BlockedUserId == request.UserIdToBlock);
+        var alreadyBlocked = await _unitOfWork.Blocks.AnyAsync(
+            b => b.BlockerUserId == currentUserId.Value && b.BlockedUserId == request.UserIdToBlock, cancellationToken);
         if (alreadyBlocked)
         {
             throw new ConflictException("User is already blocked.");

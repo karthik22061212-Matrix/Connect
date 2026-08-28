@@ -41,14 +41,14 @@ public class SendConnectRequestCommandHandlerTests
     public async Task Handle_ValidRequest_CreatesConnectRequest()
     {
         // Arrange
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { new User { Id = _targetUserId, UserId = "target_user" } });
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Block>());
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Connection>());
-        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ConnectRequest>());
+        _userRepoMock.Setup(r => r.GetByIdAsync(_targetUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = _targetUserId, UserId = "target_user" });
+        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _connectionRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Connection, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _requestRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<ConnectRequest, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         var command = new SendConnectRequestCommand(_targetUserId);
 
@@ -79,15 +79,12 @@ public class SendConnectRequestCommandHandlerTests
     public async Task Handle_AlreadyConnected_ThrowsConflictException()
     {
         // Arrange
-        var userAId = _currentUserId.CompareTo(_targetUserId) < 0 ? _currentUserId : _targetUserId;
-        var userBId = _currentUserId.CompareTo(_targetUserId) < 0 ? _targetUserId : _currentUserId;
-
-        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User> { new User { Id = _targetUserId, UserId = "target_user" } });
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Block>());
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Connection> { new Connection { UserAId = userAId, UserBId = userBId } });
+        _userRepoMock.Setup(r => r.GetByIdAsync(_targetUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { Id = _targetUserId, UserId = "target_user" });
+        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _connectionRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Connection, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var command = new SendConnectRequestCommand(_targetUserId);
 

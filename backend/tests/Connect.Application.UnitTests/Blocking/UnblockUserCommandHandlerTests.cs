@@ -30,8 +30,8 @@ public class UnblockUserCommandHandlerTests
     public async Task Handle_ExistingBlock_RemovesBlockRecord()
     {
         var existingBlock = new Block { Id = Guid.NewGuid(), BlockerUserId = _userId, BlockedUserId = _targetUserId };
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Block> { existingBlock });
+        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingBlock);
 
         var command = new UnblockUserCommand(_targetUserId);
         var result = await _handler.Handle(command, CancellationToken.None);
@@ -44,8 +44,8 @@ public class UnblockUserCommandHandlerTests
     [Fact]
     public async Task Handle_NonExistingBlock_ThrowsNotFoundException()
     {
-        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Block>());
+        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Block?)null);
 
         var command = new UnblockUserCommand(_targetUserId);
         await Assert.ThrowsAsync<NotFoundException>(() => _handler.Handle(command, CancellationToken.None));

@@ -53,10 +53,9 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
         }
 
         // Check blocks
-        var blocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
-        var isBlocked = blocks.Any(b =>
+        var isBlocked = await _unitOfWork.Blocks.AnyAsync(b =>
             (b.BlockerUserId == callerId && b.BlockedUserId == request.CalleeId) ||
-            (b.BlockerUserId == request.CalleeId && b.BlockedUserId == callerId));
+            (b.BlockerUserId == request.CalleeId && b.BlockedUserId == callerId), cancellationToken);
 
         if (isBlocked)
         {
@@ -67,8 +66,8 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
         var userAId = callerId.CompareTo(request.CalleeId) < 0 ? callerId : request.CalleeId;
         var userBId = callerId.CompareTo(request.CalleeId) < 0 ? request.CalleeId : callerId;
 
-        var connections = await _unitOfWork.Connections.ListAsync(cancellationToken);
-        var connection = connections.FirstOrDefault(c => c.UserAId == userAId && c.UserBId == userBId);
+        var connection = await _unitOfWork.Connections.FirstOrDefaultAsync(
+            c => c.UserAId == userAId && c.UserBId == userBId, cancellationToken);
 
         if (connection == null)
         {

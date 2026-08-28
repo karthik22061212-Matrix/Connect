@@ -29,6 +29,16 @@ public class Repository<T> : IRepository<T> where T : BaseEntity
         return await _dbContext.Set<T>().Where(predicate).ToListAsync(ct);
     }
 
+    public async Task<bool> AnyAsync(Expression<Func<T, bool>> predicate, CancellationToken ct = default)
+    {
+        return await _dbContext.Set<T>().AnyAsync(predicate, ct);
+    }
+
+    public async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, CancellationToken ct = default)
+    {
+        return await _dbContext.Set<T>().FirstOrDefaultAsync(predicate, ct);
+    }
+
     public void Add(T entity)
     {
         _dbContext.Set<T>().Add(entity);

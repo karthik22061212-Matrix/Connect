@@ -15,11 +15,10 @@ public class CheckUserIdAvailabilityQueryHandler : IRequestHandler<CheckUserIdAv
 
     public async Task<UserIdAvailabilityDto> Handle(CheckUserIdAvailabilityQuery request, CancellationToken cancellationToken)
     {
-        var users = await _unitOfWork.Users.ListAsync(cancellationToken);
+        var userIdLower = request.UserId.ToLower();
+        var isTaken = await _unitOfWork.Users.AnyAsync(
+            u => !u.IsDeleted && u.UserId.ToLower() == userIdLower, cancellationToken);
 
-        var isAvailable = !users.Any(u =>
-            u.UserId.Equals(request.UserId, StringComparison.OrdinalIgnoreCase));
-
-        return new UserIdAvailabilityDto(request.UserId, isAvailable);
+        return new UserIdAvailabilityDto(request.UserId, !isTaken);
     }
 }

@@ -28,11 +28,9 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, AuthResponseDto
 
     public async Task<AuthResponseDto> Handle(LoginCommand request, CancellationToken cancellationToken)
     {
-        var users = await _unitOfWork.Users.ListAsync(cancellationToken);
-
-        var user = users.FirstOrDefault(u =>
-            u.Email.Equals(request.EmailOrUserId, StringComparison.OrdinalIgnoreCase) ||
-            u.UserId.Equals(request.EmailOrUserId, StringComparison.OrdinalIgnoreCase));
+        var search = request.EmailOrUserId.ToLower();
+        var user = await _unitOfWork.Users.FirstOrDefaultAsync(u =>
+            u.Email.ToLower() == search || u.UserId.ToLower() == search, cancellationToken);
 
         if (user == null)
         {
