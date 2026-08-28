@@ -132,7 +132,10 @@ class MainConsumerDashboard extends StatefulWidget {
 }
 
 class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
-  final String _baseUrl = 'https://connect-api-5633.azurewebsites.net';
+  static const String _baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://localhost:5200',
+  );
 
   // DEV NOTE: Dual user slot switcher (_user1Session vs _user2Session) is for dev/e2e test harness
   // convenience only on web. Will be removed once single-account-per-device persistent auth is standard.
@@ -218,6 +221,76 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
   }
 
+  Timer? _expiryTimer;
+
+  String _decodeBase64(String str) {
+    String output = str.replaceAll('-', '+').replaceAll('_', '/');
+    switch (output.length % 4) {
+      case 0:
+        break;
+      case 2:
+        output += '==';
+        break;
+      case 3:
+        output += '=';
+        break;
+      default:
+        throw Exception('Illegal base64url string!');
+    }
+    return utf8.decode(base64.decode(output));
+  }
+
+  DateTime? _getJwtExpiry(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return null;
+      final payloadString = _decodeBase64(parts[1]);
+      final Map<String, dynamic> payload = jsonDecode(payloadString);
+      if (payload.containsKey('exp')) {
+        final exp = payload['exp'];
+        int? expSeconds;
+        if (exp is int) {
+          expSeconds = exp;
+        } else if (exp is double) {
+          expSeconds = exp.toInt();
+        } else if (exp is String) {
+          expSeconds = int.tryParse(exp);
+        }
+        if (expSeconds != null) {
+          return DateTime.fromMillisecondsSinceEpoch(expSeconds * 1000, isUtc: true);
+        }
+      }
+    } catch (e) {
+      _log('Error parsing JWT expiry: $e');
+    }
+    return null;
+  }
+
+  bool _scheduleExpiryTimer(String? token) {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+
+    if (token == null || token.isEmpty) return false;
+
+    final expiryDate = _getJwtExpiry(token);
+    if (expiryDate == null) return false;
+
+    final remaining = expiryDate.difference(DateTime.now().toUtc());
+    _log('JWT expiry time: ${expiryDate.toIso8601String()} (remaining: ${remaining.inSeconds}s)');
+
+    if (remaining.inMilliseconds <= 0) {
+      _log('JWT token is already expired. Triggering immediate logout cleanup.');
+      _handle401();
+      return true;
+    } else {
+      _expiryTimer = Timer(remaining, () {
+        _log('Proactive JWT expiry timer fired after ${remaining.inSeconds}s idle.');
+        _handle401();
+      });
+      return false;
+    }
+  }
+
   // --- LocalStorage Session Persistence Helpers ---
   void _saveSessionToLocalStorage(UserSession session) {
     try {
@@ -238,6 +311,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       final handle = html.window.localStorage['connect_handle'];
 
       if (token != null && token.isNotEmpty && handle != null && handle.isNotEmpty) {
+        final isExpired = _scheduleExpiryTimer(token);
+        if (isExpired) {
+          _log('Stored session token was expired on load. Cleared and returned to login.');
+          return;
+        }
+
         final restoredSession = UserSession(
           token: token,
           id: id ?? '',
@@ -269,11 +348,14 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _handle401() {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
     _clearSessionFromLocalStorage();
     _hubConnection?.stop();
     setState(() {
       _user1Session = null;
       _user2Session = null;
+      _activeSessionIndex = 1;
       _isHubConnected = false;
       _authSuccessMessage = null;
       _authErrorMessage = null;
@@ -281,7 +363,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Session expired or unauthorized. Please log in again.'),
+          content: Text('Session expired. Please log in again.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -289,6 +371,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _logout() {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
     _clearSessionFromLocalStorage();
     _hubConnection?.stop();
     setState(() {
@@ -378,6 +462,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   @override
   void dispose() {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
     _hubConnection?.stop();
     _callTimer?.cancel();
     _ringTimer?.cancel();
@@ -745,6 +831,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         final data = jsonDecode(res.body);
         final session = UserSession.fromJson(data);
         _saveSessionToLocalStorage(session);
+        _scheduleExpiryTimer(session.token);
         setState(() {
           if (sessionSlot == 1) {
             _user1Session = session;
@@ -821,6 +908,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         final data = jsonDecode(res.body);
         final session = UserSession.fromJson(data);
         _saveSessionToLocalStorage(session);
+        _scheduleExpiryTimer(session.token);
         setState(() {
           if (sessionSlot == 1) {
             _user1Session = session;
@@ -1352,9 +1440,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
     _log('Switched Active Session Slot to User $slot (${currentSession?.handle ?? 'Logged Out'})');
     if (currentSession != null) {
+      _scheduleExpiryTimer(currentSession!.token);
       await _connectSignalR();
       _refreshActiveTabData();
     } else {
+      _expiryTimer?.cancel();
+      _expiryTimer = null;
       _hubConnection?.stop();
       setState(() {
         _isHubConnected = false;
