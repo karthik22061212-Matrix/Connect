@@ -103,12 +103,14 @@ class ConnectApp extends StatelessWidget {
 
 class UserSession {
   final String token;
+  final String refreshToken;
   final String id;
   final String email;
   final String handle;
 
   UserSession({
     required this.token,
+    required this.refreshToken,
     required this.id,
     required this.email,
     required this.handle,
@@ -116,10 +118,11 @@ class UserSession {
 
   factory UserSession.fromJson(Map<String, dynamic> json) {
     return UserSession(
-      token: json['token'] ?? '',
-      id: json['id'] ?? '',
-      email: json['email'] ?? '',
-      handle: json['userId'] ?? '',
+      token: json['token'] ?? json['Token'] ?? '',
+      refreshToken: json['refreshToken'] ?? json['RefreshToken'] ?? '',
+      id: json['id'] ?? json['Id'] ?? '',
+      email: json['email'] ?? json['Email'] ?? '',
+      handle: json['userId'] ?? json['UserId'] ?? '',
     );
   }
 }
@@ -279,25 +282,101 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     _log('JWT expiry time: ${expiryDate.toIso8601String()} (remaining: ${remaining.inSeconds}s)');
 
     if (remaining.inMilliseconds <= 0) {
-      _log('JWT token is already expired. Triggering immediate logout cleanup.');
-      _handle401();
+      _log('JWT token is expired. Triggering silent refresh before logout.');
+      _onTokenExpired();
       return true;
     } else {
       _expiryTimer = Timer(remaining, () {
         _log('Proactive JWT expiry timer fired after ${remaining.inSeconds}s idle.');
-        _handle401();
+        _onTokenExpired();
       });
       return false;
     }
   }
 
-  // --- LocalStorage Session Persistence Helpers ---
-  void _saveSessionToLocalStorage(UserSession session) {
+  void _onTokenExpired() async {
+    final refreshed = await _attemptSilentRefresh();
+    if (!refreshed) {
+      _handle401();
+    }
+  }
+
+  Future<bool> _attemptSilentRefresh() async {
+    final session = currentSession;
+    if (session == null || session.refreshToken.isEmpty) {
+      _log('Silent refresh aborted: no active session or refresh token available.');
+      return false;
+    }
+
+    _log('Attempting silent token refresh for slot $_activeSessionIndex (@${session.handle})...');
     try {
-      html.window.localStorage['connect_token'] = session.token;
-      html.window.localStorage['connect_id'] = session.id;
-      html.window.localStorage['connect_email'] = session.email;
-      html.window.localStorage['connect_handle'] = session.handle;
+      final res = await http.post(
+        Uri.parse('$_baseUrl/api/v1/auth/refresh'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': session.refreshToken}),
+      );
+
+      _log('Silent refresh response status: ${res.statusCode}');
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final updatedSession = UserSession(
+          token: data['token'] ?? data['Token'] ?? '',
+          refreshToken: data['refreshToken'] ?? data['RefreshToken'] ?? '',
+          id: data['id'] ?? data['Id'] ?? session.id,
+          email: data['email'] ?? data['Email'] ?? session.email,
+          handle: data['userId'] ?? data['UserId'] ?? session.handle,
+        );
+
+        if (updatedSession.token.isNotEmpty && updatedSession.refreshToken.isNotEmpty) {
+          _saveSessionToLocalStorage(updatedSession, _activeSessionIndex);
+          setState(() {
+            if (_activeSessionIndex == 1) {
+              _user1Session = updatedSession;
+            } else {
+              _user2Session = updatedSession;
+            }
+          });
+          _scheduleExpiryTimer(updatedSession.token);
+          _log('Silent refresh successful for slot $_activeSessionIndex. Access & refresh tokens rotated.');
+          return true;
+        }
+      }
+    } catch (e) {
+      _log('Silent refresh exception: $e');
+    }
+
+    return false;
+  }
+
+  Future<http.Response?> _authenticatedApiCall(Future<http.Response> Function(String token) requestFn) async {
+    final session = currentSession;
+    if (session == null) return null;
+
+    var res = await requestFn(session.token);
+    if (res.statusCode == 401) {
+      _log('Received HTTP 401 from API. Attempting silent refresh before retrying...');
+      final refreshed = await _attemptSilentRefresh();
+      if (refreshed && currentSession != null) {
+        _log('Silent refresh succeeded. Retrying original API request...');
+        res = await requestFn(currentSession!.token);
+      } else {
+        _log('Silent refresh failed. Forcing logout...');
+        _handle401();
+      }
+    }
+    return res;
+  }
+
+  // --- LocalStorage Session Persistence Helpers ---
+  void _saveSessionToLocalStorage(UserSession session, [int? slot]) {
+    final s = slot ?? _activeSessionIndex;
+    final prefix = s == 2 ? 'connect_u2_' : 'connect_';
+    try {
+      html.window.localStorage['${prefix}token'] = session.token;
+      html.window.localStorage['${prefix}refresh_token'] = session.refreshToken;
+      html.window.localStorage['${prefix}id'] = session.id;
+      html.window.localStorage['${prefix}email'] = session.email;
+      html.window.localStorage['${prefix}handle'] = session.handle;
     } catch (e) {
       _log('Error saving session to localStorage: $e');
     }
@@ -305,29 +384,48 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   void _loadSessionFromLocalStorage() {
     try {
-      final token = html.window.localStorage['connect_token'];
-      final id = html.window.localStorage['connect_id'];
-      final email = html.window.localStorage['connect_email'];
-      final handle = html.window.localStorage['connect_handle'];
+      // Slot 1
+      final token1 = html.window.localStorage['connect_token'];
+      final refresh1 = html.window.localStorage['connect_refresh_token'] ?? '';
+      final id1 = html.window.localStorage['connect_id'];
+      final email1 = html.window.localStorage['connect_email'];
+      final handle1 = html.window.localStorage['connect_handle'];
 
-      if (token != null && token.isNotEmpty && handle != null && handle.isNotEmpty) {
-        final isExpired = _scheduleExpiryTimer(token);
-        if (isExpired) {
-          _log('Stored session token was expired on load. Cleared and returned to login.');
-          return;
-        }
-
-        final restoredSession = UserSession(
-          token: token,
-          id: id ?? '',
-          email: email ?? '',
-          handle: handle,
+      if (token1 != null && token1.isNotEmpty && handle1 != null && handle1.isNotEmpty) {
+        _user1Session = UserSession(
+          token: token1,
+          refreshToken: refresh1,
+          id: id1 ?? '',
+          email: email1 ?? '',
+          handle: handle1,
         );
-        setState(() {
-          _user1Session = restoredSession;
-          _activeSessionIndex = 1;
-        });
-        _log('Restored session for @$handle from localStorage');
+      }
+
+      // Slot 2
+      final token2 = html.window.localStorage['connect_u2_token'];
+      final refresh2 = html.window.localStorage['connect_u2_refresh_token'] ?? '';
+      final id2 = html.window.localStorage['connect_u2_id'];
+      final email2 = html.window.localStorage['connect_u2_email'];
+      final handle2 = html.window.localStorage['connect_u2_handle'];
+
+      if (token2 != null && token2.isNotEmpty && handle2 != null && handle2.isNotEmpty) {
+        _user2Session = UserSession(
+          token: token2,
+          refreshToken: refresh2,
+          id: id2 ?? '',
+          email: email2 ?? '',
+          handle: handle2,
+        );
+      }
+
+      if (_user1Session != null) {
+        _activeSessionIndex = 1;
+        _scheduleExpiryTimer(_user1Session!.token);
+        _connectSignalR();
+        _refreshActiveTabData();
+      } else if (_user2Session != null) {
+        _activeSessionIndex = 2;
+        _scheduleExpiryTimer(_user2Session!.token);
         _connectSignalR();
         _refreshActiveTabData();
       }
@@ -336,12 +434,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  void _clearSessionFromLocalStorage() {
+  void _clearSessionFromLocalStorage([int? slot]) {
+    final s = slot ?? _activeSessionIndex;
+    final prefix = s == 2 ? 'connect_u2_' : 'connect_';
     try {
-      html.window.localStorage.remove('connect_token');
-      html.window.localStorage.remove('connect_id');
-      html.window.localStorage.remove('connect_email');
-      html.window.localStorage.remove('connect_handle');
+      html.window.localStorage.remove('${prefix}token');
+      html.window.localStorage.remove('${prefix}refresh_token');
+      html.window.localStorage.remove('${prefix}id');
+      html.window.localStorage.remove('${prefix}email');
+      html.window.localStorage.remove('${prefix}handle');
     } catch (e) {
       _log('Error clearing session from localStorage: $e');
     }
@@ -350,12 +451,14 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   void _handle401() {
     _expiryTimer?.cancel();
     _expiryTimer = null;
-    _clearSessionFromLocalStorage();
+    _clearSessionFromLocalStorage(_activeSessionIndex);
     _hubConnection?.stop();
     setState(() {
-      _user1Session = null;
-      _user2Session = null;
-      _activeSessionIndex = 1;
+      if (_activeSessionIndex == 1) {
+        _user1Session = null;
+      } else {
+        _user2Session = null;
+      }
       _isHubConnected = false;
       _authSuccessMessage = null;
       _authErrorMessage = null;
@@ -370,10 +473,25 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  void _logout() {
+  void _logout() async {
     _expiryTimer?.cancel();
     _expiryTimer = null;
-    _clearSessionFromLocalStorage();
+
+    final session = currentSession;
+    if (session != null && session.refreshToken.isNotEmpty) {
+      try {
+        await http.post(
+          Uri.parse('$_baseUrl/api/v1/auth/logout'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'refreshToken': session.refreshToken}),
+        );
+        _log('Server-side refresh token revoked via POST /api/v1/auth/logout');
+      } catch (e) {
+        _log('Logout REST exception: $e');
+      }
+    }
+
+    _clearSessionFromLocalStorage(_activeSessionIndex);
     _hubConnection?.stop();
     setState(() {
       if (_activeSessionIndex == 1) {
@@ -385,7 +503,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _authSuccessMessage = 'Logged out successfully.';
       _authErrorMessage = null;
     });
-    _log('Logged out and cleared localStorage session');
+    _log('Logged out slot $_activeSessionIndex and cleared localStorage session');
   }
 
   @override
@@ -953,16 +1071,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
 
     try {
-      final res = await http.get(
+      final res = await _authenticatedApiCall((token) => http.get(
         Uri.parse('$_baseUrl/api/v1/users/search?query=$q'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       _log('Search Users "$q" -> Status ${res.statusCode}: ${res.body}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       if (res.statusCode == 200) {
         setState(() {
@@ -987,20 +1102,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.post(
+      final res = await _authenticatedApiCall((token) => http.post(
         Uri.parse('$_baseUrl/api/v1/connect-requests'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${session.token}',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode({'toUserId': targetGuidId}),
-      );
+      ));
+      if (res == null) return;
 
       _log('Send Connect Request -> Status ${res.statusCode}: ${res.body}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         setState(() {
@@ -1038,15 +1150,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.get(
+      final res = await _authenticatedApiCall((token) => http.get(
         Uri.parse('$_baseUrl/api/v1/connect-requests/pending'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
-
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       if (res.statusCode == 200) {
         setState(() {
@@ -1063,16 +1171,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null || requestId.isEmpty || requestId == 'null') return;
 
     try {
-      final res = await http.post(
+      final res = await _authenticatedApiCall((token) => http.post(
         Uri.parse('$_baseUrl/api/v1/connect-requests/$requestId/accept'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       _log('Accept Request $requestId -> Status ${res.statusCode}: ${res.body}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       await _fetchPendingRequests();
       await _fetchConnections();
@@ -1094,16 +1199,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null || requestId.isEmpty || requestId == 'null') return;
 
     try {
-      final res = await http.post(
+      final res = await _authenticatedApiCall((token) => http.post(
         Uri.parse('$_baseUrl/api/v1/connect-requests/$requestId/decline'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       _log('Decline Request $requestId -> Status ${res.statusCode}: ${res.body}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       await _fetchPendingRequests();
       await _fetchConnections();
@@ -1120,21 +1222,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-
   Future<void> _fetchConnections() async {
     final session = currentSession;
     if (session == null) return;
 
     try {
-      final res = await http.get(
+      final res = await _authenticatedApiCall((token) => http.get(
         Uri.parse('$_baseUrl/api/v1/connections'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
-
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       if (res.statusCode == 200) {
         setState(() {
@@ -1208,14 +1305,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     final session = currentSession;
     if (session != null) {
       try {
-        final res = await http.post(
+        final res = await _authenticatedApiCall((token) => http.post(
           Uri.parse('$_baseUrl/api/v1/calls/$_activeCallId/end'),
-          headers: {'Authorization': 'Bearer ${session.token}'},
-        );
-        _log('REST EndCall -> Status ${res.statusCode}: ${res.body}');
-        if (res.statusCode == 401) {
-          _handle401();
-          return;
+          headers: {'Authorization': 'Bearer $token'},
+        ));
+        if (res != null) {
+          _log('REST EndCall -> Status ${res.statusCode}: ${res.body}');
         }
       } catch (e) {
         _log('REST EndCall Exception: $e');
@@ -1246,15 +1341,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.get(
+      final res = await _authenticatedApiCall((token) => http.get(
         Uri.parse('$_baseUrl/api/v1/calls/history?pageNumber=1&pageSize=20'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
-
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -1272,16 +1363,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.post(
+      final res = await _authenticatedApiCall((token) => http.post(
         Uri.parse('$_baseUrl/api/v1/users/$targetGuidId/block'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       _log('Block User $targetGuidId -> Status ${res.statusCode}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       await _fetchBlockedUsers();
       await _fetchConnections();
@@ -1304,10 +1392,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.delete(
+      final res = await _authenticatedApiCall((token) => http.delete(
         Uri.parse('$_baseUrl/api/v1/users/$targetGuidId/block'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       _log('Unblock User $targetGuidId -> Status ${res.statusCode}');
       if (res.statusCode == 401) {
@@ -1336,15 +1425,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.get(
+      final res = await _authenticatedApiCall((token) => http.get(
         Uri.parse('$_baseUrl/api/v1/users/blocked'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
-
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       if (res.statusCode == 200) {
         setState(() {
@@ -1367,20 +1452,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     };
 
     try {
-      final res = await http.post(
+      final res = await _authenticatedApiCall((token) => http.post(
         Uri.parse('$_baseUrl/api/v1/reports'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${session.token}',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode(body),
-      );
+      ));
+      if (res == null) return;
 
       _log('Report User $reportedGuidId -> Status ${res.statusCode}: ${res.body}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       _reportReasonController.clear();
       _reportNoteController.clear();
@@ -1399,16 +1481,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     try {
-      final res = await http.delete(
+      final res = await _authenticatedApiCall((token) => http.delete(
         Uri.parse('$_baseUrl/api/v1/account'),
-        headers: {'Authorization': 'Bearer ${session.token}'},
-      );
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
 
       _log('Soft Delete Account -> Status ${res.statusCode}');
-      if (res.statusCode == 401) {
-        _handle401();
-        return;
-      }
 
       if (res.statusCode == 204 || res.statusCode == 200) {
         _log('Account soft-deleted. Log in again within 60 days to reactivate.');
