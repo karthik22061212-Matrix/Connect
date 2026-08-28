@@ -3,6 +3,8 @@ using Connect.Application.Common.Interfaces;
 using Connect.Application.Features.Calls.Commands.EndCall;
 using Connect.Application.Features.Calls.Commands.FailCall;
 using Connect.Application.Features.Calls.Commands.InitiateCall;
+using Connect.Application.Features.Calls.Commands.RecordNetworkDrop;
+using Connect.Application.Features.Calls.Commands.RecordNetworkRestored;
 using Connect.Domain.Entities;
 using Connect.Domain.Enums;
 using MediatR;
@@ -128,44 +130,6 @@ public class CallHub : Hub<ICallHubClient>
                 var callId = result.CallId.Value;
                 var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(calleeId);
                 await Clients.Clients(targetConnections).IncomingCall(callId, result.CallerId, result.CallerUserIdHandle ?? "");
-
-                // Ring Timeout Task: 15 Seconds
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(15000);
-                    using var scope = _serviceScopeFactory.CreateScope();
-                    var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                    var presenceTracker = scope.ServiceProvider.GetRequiredService<IPresenceTracker>();
-                    var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<CallHub, ICallHubClient>>();
-                    var dateTimeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-
-                    var call = await unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
-                    if (call != null && call.Status == CallStatus.Ringing)
-                    {
-                        var now = dateTimeProvider.UtcNow;
-                        call.Status = CallStatus.Missed;
-                        call.MissedReason = MissedReason.NoAnswer;
-                        call.EndedAt = now;
-                        call.UpdatedAt = now;
-                        await unitOfWork.SaveChangesAsync(CancellationToken.None);
-
-                        var callerConn = await presenceTracker.GetConnectionIdsForUserAsync(call.CallerId);
-                        var calleeConn = await presenceTracker.GetConnectionIdsForUserAsync(call.CalleeId);
-
-                        await hubContext.Clients.Clients(callerConn).CallTimeout(callId);
-                        await hubContext.Clients.Clients(callerConn).CalleeUnavailable(call.CalleeId, "NoAnswer");
-                        await hubContext.Clients.Clients(calleeConn).CallEnded(callId);
-
-                        var callerUser = await unitOfWork.Users.GetByIdAsync(call.CallerId, CancellationToken.None);
-                        if (calleeConn.Count > 0)
-                        {
-                            await hubContext.Clients.Clients(calleeConn).MissedCallNotification(callId, call.CallerId, callerUser?.UserId ?? "", call.StartedAt);
-                        }
-
-                        var pushService = scope.ServiceProvider.GetRequiredService<IPushNotificationService>();
-                        await pushService.SendMissedCallNotificationAsync(call.CalleeId, callId, callerUser?.UserId ?? "", MissedReason.NoAnswer, CancellationToken.None);
-                    }
-                });
             }
         }
         catch (Exception ex)
@@ -188,6 +152,8 @@ public class CallHub : Hub<ICallHubClient>
             call.Status = CallStatus.Accepted;
             call.AnsweredAt = _dateTimeProvider.UtcNow;
             call.UpdatedAt = _dateTimeProvider.UtcNow;
+            call.TimeoutDeadline = null;
+            call.TimeoutType = null;
             await _unitOfWork.SaveChangesAsync(CancellationToken.None);
 
             // Set both users to Busy during active call
@@ -202,6 +168,8 @@ public class CallHub : Hub<ICallHubClient>
             call.Status = CallStatus.Rejected;
             call.EndedAt = _dateTimeProvider.UtcNow;
             call.UpdatedAt = _dateTimeProvider.UtcNow;
+            call.TimeoutDeadline = null;
+            call.TimeoutType = null;
             await _unitOfWork.SaveChangesAsync(CancellationToken.None);
 
             var callerConnections = await _presenceTracker.GetConnectionIdsForUserAsync(call.CallerId);
@@ -259,48 +227,32 @@ public class CallHub : Hub<ICallHubClient>
 
     public async Task NotifyNetworkDrop(Guid callId)
     {
-        var userId = GetUserId();
-        var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
-        if (call == null) return;
-
-        var targetUserId = call.CallerId == userId ? call.CalleeId : call.CallerId;
-        var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(targetUserId);
-        await Clients.Clients(targetConnections).NetworkReconnecting(callId);
-
-        // 10-Second Auto-Reconnect Window Timer
-        _ = Task.Run(async () =>
+        try
         {
-            await Task.Delay(10000);
-            using var scope = _serviceScopeFactory.CreateScope();
-            var mediator = scope.ServiceProvider.GetRequiredService<ISender>();
-            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var presenceTracker = scope.ServiceProvider.GetRequiredService<IPresenceTracker>();
-            var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<CallHub, ICallHubClient>>();
+            var result = await _mediator.Send(new RecordNetworkDropCommand(callId));
 
-            var currentCall = await unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
-            if (currentCall != null && (currentCall.Status == CallStatus.Accepted || currentCall.Status == CallStatus.Ringing))
-            {
-                await mediator.Send(new FailCallCommand(callId, MissedReason.ConnectionFailed));
-
-                var callerConn = await presenceTracker.GetConnectionIdsForUserAsync(currentCall.CallerId);
-                var calleeConn = await presenceTracker.GetConnectionIdsForUserAsync(currentCall.CalleeId);
-                var allConns = callerConn.Concat(calleeConn).ToList();
-
-                await hubContext.Clients.Clients(allConns).CallFailed(callId, "Network drop timeout - failed to reconnect within 10 seconds");
-                await hubContext.Clients.Clients(allConns).CallEnded(callId);
-            }
-        });
+            var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(result.OtherUserId);
+            await Clients.Clients(targetConnections).NetworkReconnecting(callId);
+        }
+        catch (Exception ex)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task NotifyNetworkRestored(Guid callId)
     {
-        var userId = GetUserId();
-        var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
-        if (call == null) return;
+        try
+        {
+            var result = await _mediator.Send(new RecordNetworkRestoredCommand(callId));
 
-        var targetUserId = call.CallerId == userId ? call.CalleeId : call.CallerId;
-        var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(targetUserId);
-        await Clients.Clients(targetConnections).NetworkRestored(callId);
+            var targetConnections = await _presenceTracker.GetConnectionIdsForUserAsync(result.OtherUserId);
+            await Clients.Clients(targetConnections).NetworkRestored(callId);
+        }
+        catch (Exception ex)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task NotifyCallFailed(Guid callId, string reason)

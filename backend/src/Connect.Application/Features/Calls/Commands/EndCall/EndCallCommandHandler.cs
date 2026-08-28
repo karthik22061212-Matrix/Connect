@@ -49,6 +49,8 @@ public class EndCallCommandHandler : IRequestHandler<EndCallCommand, EndCallResu
             call.DurationSeconds = (int)(now - call.AnsweredAt.Value).TotalSeconds;
         }
         call.UpdatedAt = now;
+        call.TimeoutDeadline = null;
+        call.TimeoutType = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
