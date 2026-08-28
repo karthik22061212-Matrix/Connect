@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Connect.Infrastructure;
@@ -52,34 +53,24 @@ public static class DependencyInjection
 
         services.AddSignalR();
 
-        var secret = configuration["JwtSettings:Secret"];
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            secret = "SuperSecretKeyForConnectAppJwtTokenGeneration2026!";
-        }
-        var issuer = configuration["JwtSettings:Issuer"];
-        if (string.IsNullOrWhiteSpace(issuer))
-        {
-            issuer = "ConnectApi";
-        }
-        var audience = configuration["JwtSettings:Audience"];
-        if (string.IsNullOrWhiteSpace(audience))
-        {
-            audience = "ConnectClient";
-        }
+        services.AddOptions<JwtSettings>()
+            .Bind(configuration.GetSection(JwtSettings.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
-        services.AddAuthentication(defaultScheme: JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<IOptions<JwtSettings>>((options, jwtSettingsOptions) =>
             {
+                var jwtSettings = jwtSettingsOptions.Value;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
                     ValidateAudience = true,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    ValidIssuer = issuer,
-                    ValidAudience = audience,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
+                    ValidIssuer = jwtSettings.Issuer,
+                    ValidAudience = jwtSettings.Audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
                     ClockSkew = TimeSpan.Zero
                 };
 
@@ -97,6 +88,9 @@ public static class DependencyInjection
                     }
                 };
             });
+
+        services.AddAuthentication(defaultScheme: JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer();
 
         return services;
     }
