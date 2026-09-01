@@ -156,6 +156,29 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
+  final List<RTCIceCandidate> _pendingIceCandidates = [];
+
+  Future<void> _processPendingIceCandidates() async {
+    if (_peerConnection == null) return;
+
+    final remoteDesc = await _peerConnection!.getRemoteDescription();
+    if (remoteDesc == null) return;
+
+    if (_pendingIceCandidates.isEmpty) return;
+
+    _log('Processing ${_pendingIceCandidates.length} queued ICE candidates...');
+    final processed = <RTCIceCandidate>[];
+    for (var candidate in _pendingIceCandidates) {
+      try {
+        await _peerConnection!.addCandidate(candidate);
+        _log('Successfully processed queued ICE Candidate.');
+        processed.add(candidate);
+      } catch (e) {
+        _log('Failed to process queued ICE Candidate: $e');
+      }
+    }
+    _pendingIceCandidates.removeWhere((c) => processed.contains(c));
+  }
 
   final TextEditingController _searchQueryController = TextEditingController();
   List<dynamic> _searchResults = [];
@@ -231,7 +254,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   Future<void> _setupWebRTC() async {
     _log('Initializing RTCPeerConnection...');
     final configuration = <String, dynamic>{
-      'iceServers': [],
+      'iceServers': [
+        {
+          'urls': 'stun:stun.l.google.com:19302',
+        },
+      ],
     };
     _peerConnection = await createPeerConnection(configuration);
 
@@ -871,6 +898,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _activeCallId = null;
         _callStatusText = 'Call declined';
       });
+      _pendingIceCandidates.clear();
       _fetchCallHistory();
     });
 
@@ -885,6 +913,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _activeCallId = null;
         _callStatusText = 'Call ended';
       });
+      _pendingIceCandidates.clear();
       _fetchCallHistory();
     });
 
@@ -899,6 +928,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _activeCallId = null;
         _callStatusText = 'No answer';
       });
+      _pendingIceCandidates.clear();
       _fetchCallHistory();
     });
 
@@ -959,6 +989,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         if (_peerConnection != null) {
           _log('Setting Remote Description (Offer)...');
           await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+          await _processPendingIceCandidates();
 
           _log('Creating SDP Answer...');
           RTCSessionDescription answer = await _peerConnection!.createAnswer();
@@ -976,12 +1007,19 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         final sdp = args[1].toString();
         _log('Setting Remote Description (Answer)...');
         await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+        await _processPendingIceCandidates();
       }
     });
 
     _hubConnection!.on('ReceiveIceCandidate', (args) async {
       _log('SignalR Event: ReceiveIceCandidate -> $args');
-      if (args != null && args.length >= 2 && _peerConnection != null) {
+      if (args != null && args.length >= 2) {
+        final callId = args[0].toString();
+        if (_activeCallId == null || callId != _activeCallId) {
+          _log('Discarding ICE candidate for non-active call.');
+          return;
+        }
+
         final candidateJson = args[1].toString();
         try {
           final Map<String, dynamic> candidateMap = jsonDecode(candidateJson);
@@ -990,8 +1028,19 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             candidateMap['sdpMid'],
             candidateMap['sdpMLineIndex'] ?? candidateMap['sdpMlineIndex']
           );
-          await _peerConnection!.addCandidate(candidate);
-          _log('Added remote ICE Candidate.');
+
+          RTCSessionDescription? remoteDesc;
+          if (_peerConnection != null) {
+            remoteDesc = await _peerConnection!.getRemoteDescription();
+          }
+
+          if (_peerConnection == null || remoteDesc == null) {
+            _pendingIceCandidates.add(candidate);
+            _log('Queued remote ICE Candidate (Total: ${_pendingIceCandidates.length})');
+          } else {
+            await _peerConnection!.addCandidate(candidate);
+            _log('Added remote ICE Candidate immediately.');
+          }
         } catch (e) {
           _log('Error parsing/adding ICE candidate: $e');
         }
@@ -1499,6 +1548,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _activeCallId = null;
       _callStatusText = 'Call ended';
     });
+
+    _pendingIceCandidates.clear();
 
     _fetchCallHistory();
   }
