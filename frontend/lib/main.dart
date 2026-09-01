@@ -154,6 +154,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   HubConnection? _hubConnection;
   bool _isHubConnected = false;
 
+  RTCPeerConnection? _peerConnection;
+  MediaStream? _localStream;
+
   final TextEditingController _searchQueryController = TextEditingController();
   List<dynamic> _searchResults = [];
   bool _isSearching = false;
@@ -223,6 +226,43 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     setState(() {
       _consoleLogs.insert(0, '[$timestamp] $message');
     });
+  }
+
+  Future<void> _setupWebRTC() async {
+    _log('Initializing RTCPeerConnection...');
+    final configuration = <String, dynamic>{
+      'iceServers': [],
+    };
+    _peerConnection = await createPeerConnection(configuration);
+
+    _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
+      _log('WebRTC Connection State changed to: $state');
+    };
+
+    _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      _log('WebRTC ICE Connection State changed to: $state');
+    };
+
+    _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+      if (_activeCallId != null && _hubConnection != null) {
+        _log('Gathered ICE Candidate, sending to remote...');
+        _hubConnection!.invoke('SendIceCandidate', args: [_activeCallId!, jsonEncode(candidate.toMap())]);
+      }
+    };
+
+    try {
+      final Map<String, dynamic> mediaConstraints = {
+        'audio': true,
+        'video': false,
+      };
+      _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      _localStream!.getAudioTracks().forEach((track) {
+        _peerConnection!.addTrack(track, _localStream!);
+      });
+      _log('Local mic stream attached to peer connection.');
+    } catch (e) {
+      _log('Failed to capture mic during WebRTC setup: $e');
+    }
   }
 
   Future<void> _testMicCapture() async {
@@ -773,7 +813,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     });
 
-    _hubConnection!.on('CallAccepted', (args) {
+    _hubConnection!.on('CallAccepted', (args) async {
       _log('SignalR Event: CallAccepted -> $args');
       _ringTimer?.cancel();
       setState(() {
@@ -784,6 +824,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _callTimerSeconds = 0;
       });
       _startCallTimer();
+
+      await _setupWebRTC();
+      if (_peerConnection != null) {
+        _log('Creating SDP Offer...');
+        RTCSessionDescription offer = await _peerConnection!.createOffer();
+        await _peerConnection!.setLocalDescription(offer);
+        _log('Sending SDP Offer via SignalR...');
+        _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
+      }
     });
 
     _hubConnection!.on('CallRejected', (args) {
@@ -872,6 +921,55 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _fetchConnections();
       if (_searchQueryController.text.isNotEmpty) {
         _searchUsers();
+      }
+    });
+
+    _hubConnection!.on('ReceiveWebRtcOffer', (args) async {
+      _log('SignalR Event: ReceiveWebRtcOffer -> $args');
+      if (args != null && args.length >= 2) {
+        final callId = args[0].toString();
+        final sdp = args[1].toString();
+
+        await _setupWebRTC();
+        if (_peerConnection != null) {
+          _log('Setting Remote Description (Offer)...');
+          await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+
+          _log('Creating SDP Answer...');
+          RTCSessionDescription answer = await _peerConnection!.createAnswer();
+          await _peerConnection!.setLocalDescription(answer);
+
+          _log('Sending SDP Answer via SignalR...');
+          _hubConnection!.invoke('SendWebRtcAnswer', args: [callId, answer.sdp!]);
+        }
+      }
+    });
+
+    _hubConnection!.on('ReceiveWebRtcAnswer', (args) async {
+      _log('SignalR Event: ReceiveWebRtcAnswer -> $args');
+      if (args != null && args.length >= 2 && _peerConnection != null) {
+        final sdp = args[1].toString();
+        _log('Setting Remote Description (Answer)...');
+        await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+      }
+    });
+
+    _hubConnection!.on('ReceiveIceCandidate', (args) async {
+      _log('SignalR Event: ReceiveIceCandidate -> $args');
+      if (args != null && args.length >= 2 && _peerConnection != null) {
+        final candidateJson = args[1].toString();
+        try {
+          final Map<String, dynamic> candidateMap = jsonDecode(candidateJson);
+          final candidate = RTCIceCandidate(
+            candidateMap['candidate'],
+            candidateMap['sdpMid'],
+            candidateMap['sdpMLineIndex'] ?? candidateMap['sdpMlineIndex']
+          );
+          await _peerConnection!.addCandidate(candidate);
+          _log('Added remote ICE Candidate.');
+        } catch (e) {
+          _log('Error parsing/adding ICE candidate: $e');
+        }
       }
     });
 
