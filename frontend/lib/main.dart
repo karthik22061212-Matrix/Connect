@@ -820,7 +820,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           _isRinging = false;
           _isActiveCall = false;
           _ringTimerSeconds = 15;
-          _callStatusText = 'Incoming call from $callerHandle';
+          _callStatusText = 'Incoming call from @$callerHandle';
         });
 
         _startRingCountdown();
@@ -845,7 +845,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isRinging = false;
         _isIncomingCall = false;
         _isActiveCall = true;
-        _callStatusText = 'Call Active';
+        _callStatusText = 'Connected';
         _callTimerSeconds = 0;
       });
       _startCallTimer();
@@ -869,7 +869,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isIncomingCall = false;
         _isActiveCall = false;
         _activeCallId = null;
-        _callStatusText = 'Call Rejected by recipient';
+        _callStatusText = 'Call declined';
       });
       _fetchCallHistory();
     });
@@ -883,7 +883,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isIncomingCall = false;
         _isActiveCall = false;
         _activeCallId = null;
-        _callStatusText = 'Call Ended';
+        _callStatusText = 'Call ended';
       });
       _fetchCallHistory();
     });
@@ -897,7 +897,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isIncomingCall = false;
         _isActiveCall = false;
         _activeCallId = null;
-        _callStatusText = 'Call Timed Out (15s Ringing)';
+        _callStatusText = 'No answer';
       });
       _fetchCallHistory();
     });
@@ -906,7 +906,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('SignalR Event: CalleeUnavailable -> $args');
       setState(() {
         _isRinging = false;
-        _callStatusText = 'Callee Unavailable';
+        _callStatusText = 'User is unavailable';
       });
     });
 
@@ -914,7 +914,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('SignalR Event: CalleeBusy -> $args');
       setState(() {
         _isRinging = false;
-        _callStatusText = 'Callee Busy';
+        _callStatusText = 'User is busy';
       });
     });
 
@@ -1446,7 +1446,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         setState(() {
           _isIncomingCall = false;
           _isActiveCall = true;
-          _callStatusText = 'Call Active';
+          _callStatusText = 'Connected';
           _callTimerSeconds = 0;
         });
         _startCallTimer();
@@ -1497,7 +1497,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _isRinging = false;
       _isIncomingCall = false;
       _activeCallId = null;
-      _callStatusText = 'Call Ended';
+      _callStatusText = 'Call ended';
     });
 
     _fetchCallHistory();
@@ -2929,7 +2929,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 8),
           Text(
-            _isActiveCall ? 'Call Active' : 'Incoming Voice Call...',
+            _isActiveCall ? 'Connected' : 'Incoming Voice Call...',
             style: TextStyle(fontSize: 16, color: Colors.teal.shade200),
           ),
           const SizedBox(height: 12),
