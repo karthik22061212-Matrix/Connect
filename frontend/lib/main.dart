@@ -162,7 +162,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (_peerConnection == null) return;
 
     final remoteDesc = await _peerConnection!.getRemoteDescription();
-    if (remoteDesc == null) return;
+    if (remoteDesc == null || remoteDesc.sdp == null) return;
 
     if (_pendingIceCandidates.isEmpty) return;
 
@@ -171,7 +171,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     for (var candidate in _pendingIceCandidates) {
       try {
         await _peerConnection!.addCandidate(candidate);
-        _log('Successfully processed queued ICE Candidate.');
+        _log('ReceiveIceCandidate: candidate processed? true (from queue)');
         processed.add(candidate);
       } catch (e) {
         _log('Failed to process queued ICE Candidate: $e');
@@ -275,6 +275,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _log('Gathered ICE Candidate, sending to remote...');
         _hubConnection!.invoke('SendIceCandidate', args: [_activeCallId!, jsonEncode(candidate.toMap())]);
       }
+    };
+
+    _peerConnection!.onTrack = (RTCTrackEvent event) {
+      _log('WebRTC Event: onTrack -> track.kind=${event.track.kind}');
     };
 
     try {
@@ -984,11 +988,14 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (args != null && args.length >= 2) {
         final callId = args[0].toString();
         final sdp = args[1].toString();
+        _log('ReceiveWebRtcOffer: callId=$callId');
 
         await _setupWebRTC();
+        _log('ReceiveWebRtcOffer: peer connection exists? ${_peerConnection != null}');
         if (_peerConnection != null) {
           _log('Setting Remote Description (Offer)...');
           await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+          _log('ReceiveWebRtcOffer: state transition -> setRemoteDescription(offer) succeeded.');
           await _processPendingIceCandidates();
 
           _log('Creating SDP Answer...');
@@ -1003,11 +1010,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('ReceiveWebRtcAnswer', (args) async {
       _log('SignalR Event: ReceiveWebRtcAnswer -> $args');
-      if (args != null && args.length >= 2 && _peerConnection != null) {
-        final sdp = args[1].toString();
-        _log('Setting Remote Description (Answer)...');
-        await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
-        await _processPendingIceCandidates();
+      if (args != null && args.length >= 2) {
+        final callId = args[0].toString();
+        _log('ReceiveWebRtcAnswer: callId=$callId');
+        _log('ReceiveWebRtcAnswer: peer connection exists? ${_peerConnection != null}');
+        if (_peerConnection != null) {
+          final sdp = args[1].toString();
+          _log('Setting Remote Description (Answer)...');
+          await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+          _log('ReceiveWebRtcAnswer: state transition -> setRemoteDescription(answer) succeeded.');
+          await _processPendingIceCandidates();
+        }
       }
     });
 
@@ -1015,6 +1028,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('SignalR Event: ReceiveIceCandidate -> $args');
       if (args != null && args.length >= 2) {
         final callId = args[0].toString();
+        _log('ReceiveIceCandidate: callId=$callId');
         if (_activeCallId == null || callId != _activeCallId) {
           _log('Discarding ICE candidate for non-active call.');
           return;
@@ -1029,17 +1043,21 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             candidateMap['sdpMLineIndex'] ?? candidateMap['sdpMlineIndex']
           );
 
+          _log('ReceiveIceCandidate: peer connection exists? ${_peerConnection != null}');
           RTCSessionDescription? remoteDesc;
           if (_peerConnection != null) {
             remoteDesc = await _peerConnection!.getRemoteDescription();
           }
 
-          if (_peerConnection == null || remoteDesc == null) {
+          bool remoteDescExists = remoteDesc != null && remoteDesc.sdp != null;
+          _log('ReceiveIceCandidate: remote description exists? $remoteDescExists');
+
+          if (_peerConnection == null || !remoteDescExists) {
             _pendingIceCandidates.add(candidate);
-            _log('Queued remote ICE Candidate (Total: ${_pendingIceCandidates.length})');
+            _log('ReceiveIceCandidate: candidate queued? true (Total: ${_pendingIceCandidates.length})');
           } else {
             await _peerConnection!.addCandidate(candidate);
-            _log('Added remote ICE Candidate immediately.');
+            _log('ReceiveIceCandidate: candidate processed? true (Added immediately)');
           }
         } catch (e) {
           _log('Error parsing/adding ICE candidate: $e');
