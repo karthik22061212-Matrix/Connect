@@ -829,6 +829,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('CallAccepted', (args) async {
       _log('SignalR Event: CallAccepted -> $args');
+
+      if (args != null && args.isNotEmpty) {
+        _activeCallId = args[0].toString();
+        _log('Resolved activeCallId from CallAccepted: $_activeCallId');
+      }
+
+      if (_activeCallId == null) {
+        _log('Error: _activeCallId is null, cannot proceed with WebRTC setup.');
+        return;
+      }
+
       _ringTimer?.cancel();
       setState(() {
         _isRinging = false;
