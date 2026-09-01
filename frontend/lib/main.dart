@@ -309,6 +309,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Timer? _expiryTimer;
+  Future<bool>? _refreshFuture;
 
   String _decodeBase64(String str) {
     String output = str.replaceAll('-', '+').replaceAll('_', '/');
@@ -385,7 +386,18 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<bool> _attemptSilentRefresh() async {
+  Future<bool> _attemptSilentRefresh() {
+    if (_refreshFuture != null) {
+      _log('Silent refresh already in flight. Waiting for completion.');
+      return _refreshFuture!;
+    }
+    _refreshFuture = _executeSilentRefresh();
+    return _refreshFuture!.whenComplete(() {
+      _refreshFuture = null;
+    });
+  }
+
+  Future<bool> _executeSilentRefresh() async {
     final session = currentSession;
     if (session == null || session.refreshToken.isEmpty) {
       _log('Silent refresh aborted: no active session or refresh token available.');

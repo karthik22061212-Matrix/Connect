@@ -146,6 +146,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task RespondToCall(Guid callId, bool accepted)
     {
         var userId = GetUserId();
+        _logger.LogInformation("RespondToCall invoked for CallId: {CallId} by UserId: {UserId} with Accepted: {Accepted}", callId, userId, accepted);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null || call.CalleeId != userId)
         {
@@ -230,6 +231,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task SendWebRtcOffer(Guid callId, string sdp)
     {
         var userId = GetUserId();
+        _logger.LogInformation("SendWebRtcOffer invoked for CallId: {CallId} by UserId: {UserId}", callId, userId);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
@@ -243,6 +245,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task SendWebRtcAnswer(Guid callId, string sdp)
     {
         var userId = GetUserId();
+        _logger.LogInformation("SendWebRtcAnswer invoked for CallId: {CallId} by UserId: {UserId}", callId, userId);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
@@ -256,6 +259,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task SendIceCandidate(Guid callId, string candidate)
     {
         var userId = GetUserId();
+        _logger.LogInformation("SendIceCandidate invoked for CallId: {CallId} by UserId: {UserId}", callId, userId);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 

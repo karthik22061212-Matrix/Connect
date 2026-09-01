@@ -13,7 +13,8 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)
     .Enrich.FromLogContext()
-    .WriteTo.Console());
+    .WriteTo.Console()
+    .WriteTo.File("logs/connect-.log", rollingInterval: RollingInterval.Day));
 
 // 2. Add services to the container
 builder.Services.AddApplication();
