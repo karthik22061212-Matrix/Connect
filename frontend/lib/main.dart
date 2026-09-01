@@ -309,7 +309,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Timer? _expiryTimer;
-  Future<bool>? _refreshFuture;
+  final Map<int, Future<bool>?> _refreshFutures = {};
 
   String _decodeBase64(String str) {
     String output = str.replaceAll('-', '+').replaceAll('_', '/');
@@ -387,13 +387,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Future<bool> _attemptSilentRefresh() {
-    if (_refreshFuture != null) {
-      _log('Silent refresh already in flight. Waiting for completion.');
-      return _refreshFuture!;
+    final slot = _activeSessionIndex;
+    if (_refreshFutures[slot] != null) {
+      _log('Silent refresh already in flight for slot $slot. Waiting for completion.');
+      return _refreshFutures[slot]!;
     }
-    _refreshFuture = _executeSilentRefresh();
-    return _refreshFuture!.whenComplete(() {
-      _refreshFuture = null;
+    final future = _executeSilentRefresh();
+    _refreshFutures[slot] = future;
+    return future.whenComplete(() {
+      _refreshFutures[slot] = null;
     });
   }
 
