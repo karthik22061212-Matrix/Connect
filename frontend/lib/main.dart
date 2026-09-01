@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:signalr_netcore/signalr_client.dart';
 
@@ -222,6 +223,49 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     setState(() {
       _consoleLogs.insert(0, '[$timestamp] $message');
     });
+  }
+
+  Future<void> _testMicCapture() async {
+    _log('Testing microphone access via getUserMedia...');
+    try {
+      final Map<String, dynamic> mediaConstraints = {
+        'audio': true,
+        'video': false,
+      };
+
+      final MediaStream stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      final tracks = stream.getAudioTracks();
+
+      _log('Mic capture SUCCESS: Stream ID = ${stream.id}');
+      _log('Audio tracks count: ${tracks.length}');
+      for (var i = 0; i < tracks.length; i++) {
+        final track = tracks[i];
+        _log('Track #$i: kind=${track.kind}, label="${track.label}", enabled=${track.enabled}, muted=${track.muted}');
+      }
+
+      if (mounted) {
+        final trackLabel = tracks.isNotEmpty ? tracks.first.label : 'audio';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Mic acquired successfully! Tracks: ${tracks.length} ($trackLabel)'),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      final errorMsg = 'Mic capture failed: $e';
+      _log(errorMsg);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMsg),
+            backgroundColor: const Color(0xFFE11D48),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Timer? _expiryTimer;
@@ -3161,14 +3205,28 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                         ),
                       ],
                     ),
-                    OutlinedButton.icon(
-                      onPressed: _connectSignalR,
-                      icon: const Icon(Icons.sync, size: 14, color: Colors.white70),
-                      label: const Text('Reconnect SignalR', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        side: const BorderSide(color: Color(0xFF475569)),
-                      ),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _testMicCapture,
+                          icon: const Icon(Icons.mic, size: 14, color: Color(0xFF4ADE80)),
+                          label: const Text('Test Mic', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            side: const BorderSide(color: Color(0xFF0D9488)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _connectSignalR,
+                          icon: const Icon(Icons.sync, size: 14, color: Colors.white70),
+                          label: const Text('Reconnect SignalR', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            side: const BorderSide(color: Color(0xFF475569)),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
