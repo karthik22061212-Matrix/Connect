@@ -156,6 +156,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
+  RTCVideoRenderer? _remoteRenderer;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
   Future<void> _processPendingIceCandidates() async {
@@ -278,7 +279,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     };
 
     _peerConnection!.onTrack = (RTCTrackEvent event) {
-      _log('WebRTC Event: onTrack -> track.kind=${event.track.kind}');
+      _log('WebRTC Event: onTrack fired, track kind=${event.track.kind}, stream count=${event.streams.length}');
+      if (event.track.kind == 'audio' && event.streams.isNotEmpty) {
+        _remoteRenderer?.srcObject = event.streams[0];
+        _log('WebRTC Event: remote stream attached');
+      }
     };
 
     try {
@@ -638,6 +643,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   @override
   void initState() {
     super.initState();
+    _remoteRenderer = RTCVideoRenderer();
+    _remoteRenderer!.initialize();
 
     _loadSessionFromLocalStorage();
 
@@ -709,6 +716,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   @override
   void dispose() {
+    _remoteRenderer?.dispose();
     _expiryTimer?.cancel();
     _expiryTimer = null;
     _hubConnection?.stop();
@@ -1532,6 +1540,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   Future<void> _endCall() async {
     if (_activeCallId == null) return;
 
+    _remoteRenderer?.srcObject = null;
     _callTimer?.cancel();
     _ringTimer?.cancel();
     _log('Ending call $_activeCallId');
@@ -2056,6 +2065,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           if (_isIncomingCall || _isActiveCall)
             Positioned.fill(child: _buildFullCallOverlay()),
           if (_showDevConsole) _buildDevConsoleSheet(),
+          if (_remoteRenderer != null)
+            SizedBox(width: 1, height: 1, child: RTCVideoView(_remoteRenderer!)),
         ],
       ),
       bottomNavigationBar: isWide
