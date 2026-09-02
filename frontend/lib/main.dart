@@ -644,7 +644,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   void initState() {
     super.initState();
     _remoteRenderer = RTCVideoRenderer();
-    _remoteRenderer!.initialize();
+    _remoteRenderer!.initialize().then((_) {
+      if (mounted) setState(() {});
+    });
 
     _loadSessionFromLocalStorage();
 
