@@ -252,8 +252,45 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
   }
 
+  html.DivElement? _debugPanel;
+  String _debugConnState = 'unknown';
+  String _debugIceState = 'unknown';
+  bool _debugOnTrackFired = false;
+  String _debugTrackKind = 'none';
+
+  void _updateWebRTCDebugPanel({String? connState, String? iceState, bool? onTrackFired, String? trackKind}) {
+    if (_debugPanel == null) {
+      _debugPanel = html.DivElement()
+        ..id = 'webrtc-debug-panel'
+        ..style.position = 'fixed'
+        ..style.bottom = '10px'
+        ..style.right = '10px'
+        ..style.backgroundColor = 'rgba(0, 0, 0, 0.8)'
+        ..style.color = 'white'
+        ..style.padding = '10px'
+        ..style.borderRadius = '5px'
+        ..style.zIndex = '9999'
+        ..style.fontFamily = 'monospace'
+        ..style.fontSize = '12px'
+        ..style.pointerEvents = 'none';
+      html.document.body?.append(_debugPanel!);
+    }
+    if (connState != null) _debugConnState = connState;
+    if (iceState != null) _debugIceState = iceState;
+    if (onTrackFired != null) _debugOnTrackFired = onTrackFired;
+    if (trackKind != null) _debugTrackKind = trackKind;
+
+    _debugPanel!.innerHtml = '''
+      <strong>WebRTC State</strong><br>
+      Conn State: $_debugConnState<br>
+      ICE State: $_debugIceState<br>
+      onTrack: $_debugOnTrackFired (kind: $_debugTrackKind)
+    ''';
+  }
+
   Future<void> _setupWebRTC() async {
     _log('Initializing RTCPeerConnection...');
+    _updateWebRTCDebugPanel();
     final configuration = <String, dynamic>{
       'iceServers': [
         {
@@ -265,10 +302,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
       _log('WebRTC Connection State changed to: $state');
+      _updateWebRTCDebugPanel(connState: state.toString());
     };
 
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
       _log('WebRTC ICE Connection State changed to: $state');
+      _updateWebRTCDebugPanel(iceState: state.toString());
     };
 
     _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
@@ -280,6 +319,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _peerConnection!.onTrack = (RTCTrackEvent event) {
       _log('WebRTC Event: onTrack fired, track kind=${event.track.kind}, stream count=${event.streams.length}');
+      _updateWebRTCDebugPanel(onTrackFired: true, trackKind: event.track.kind ?? 'unknown');
       if (event.track.kind == 'audio' && event.streams.isNotEmpty) {
         _remoteRenderer?.srcObject = event.streams[0];
         _log('WebRTC Event: remote stream attached');
