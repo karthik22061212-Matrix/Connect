@@ -883,6 +883,20 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         .withAutomaticReconnect()
         .build();
 
+    _hubConnection!.onclose(({error}) {
+      _log('SignalR Connection Closed -> $error');
+      _teardownWebRTC();
+      if (mounted) {
+        setState(() {
+          _isHubConnected = false;
+          _isRinging = false;
+          _isIncomingCall = false;
+          _isActiveCall = false;
+          _activeCallId = null;
+        });
+      }
+    });
+
     _hubConnection!.on('UserPresenceChanged', (args) {
       _log('SignalR Event: UserPresenceChanged -> $args');
       _fetchConnections();
@@ -941,8 +955,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     });
 
-    _hubConnection!.on('CallRejected', (args) {
+    _hubConnection!.on('CallRejected', (args) async {
       _log('SignalR Event: CallRejected -> $args');
+      await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
       setState(() {
@@ -952,12 +967,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _activeCallId = null;
         _callStatusText = 'Call declined';
       });
-      _pendingIceCandidates.clear();
       _fetchCallHistory();
     });
 
-    _hubConnection!.on('CallEnded', (args) {
+    _hubConnection!.on('CallEnded', (args) async {
       _log('SignalR Event: CallEnded -> $args');
+      await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
       setState(() {
@@ -967,12 +982,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _activeCallId = null;
         _callStatusText = 'Call ended';
       });
-      _pendingIceCandidates.clear();
       _fetchCallHistory();
     });
 
-    _hubConnection!.on('CallTimeout', (args) {
+    _hubConnection!.on('CallTimeout', (args) async {
       _log('SignalR Event: CallTimeout -> $args');
+      await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
       setState(() {
@@ -982,20 +997,21 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _activeCallId = null;
         _callStatusText = 'No answer';
       });
-      _pendingIceCandidates.clear();
       _fetchCallHistory();
     });
 
-    _hubConnection!.on('CalleeUnavailable', (args) {
+    _hubConnection!.on('CalleeUnavailable', (args) async {
       _log('SignalR Event: CalleeUnavailable -> $args');
+      await _teardownWebRTC();
       setState(() {
         _isRinging = false;
         _callStatusText = 'User is unavailable';
       });
     });
 
-    _hubConnection!.on('CalleeBusy', (args) {
+    _hubConnection!.on('CalleeBusy', (args) async {
       _log('SignalR Event: CalleeBusy -> $args');
+      await _teardownWebRTC();
       setState(() {
         _isRinging = false;
         _callStatusText = 'User is busy';
@@ -1579,10 +1595,21 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
+  Future<void> _teardownWebRTC() async {
+    _log('Tearing down WebRTC...');
+    _localStream?.getTracks().forEach((t) => t.stop());
+    _localStream = null;
+    await _peerConnection?.close();
+    _peerConnection = null;
+    _remoteRenderer?.srcObject = null;
+    _pendingIceCandidates.clear();
+  }
+
   Future<void> _endCall() async {
     if (_activeCallId == null) return;
 
-    _remoteRenderer?.srcObject = null;
+    await _teardownWebRTC();
+
     _callTimer?.cancel();
     _ringTimer?.cancel();
     _log('Ending call $_activeCallId');
@@ -1617,8 +1644,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _activeCallId = null;
       _callStatusText = 'Call ended';
     });
-
-    _pendingIceCandidates.clear();
 
     _fetchCallHistory();
   }
