@@ -36,3 +36,9 @@ scratch_*
 
 # Leftover deploy archives
 *.zip
+
+# Ignore specific build artifacts and test junk
+backend/publish_linux/
+backend/publish_linux_api/
+logs_extracted/
+payload.json

@@ -439,6 +439,27 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     final expiryDate = _getJwtExpiry(token);
     if (expiryDate == null) return false;
 
+    void scheduleWithCap(Duration timeRemaining) {
+      const maxDuration = Duration(days: 20); // Safe limit under JS's 24.8 day max
+      if (timeRemaining <= maxDuration) {
+        _expiryTimer = Timer(timeRemaining, () {
+          _log('Proactive JWT expiry timer fired after ${timeRemaining.inSeconds}s idle.');
+          _onTokenExpired();
+        });
+      } else {
+        _expiryTimer = Timer(maxDuration, () {
+          _log('JWT expiry timer cap reached (20 days). Rescheduling remaining...');
+          final actualRemaining = expiryDate.difference(DateTime.now().toUtc());
+          if (actualRemaining.inMilliseconds <= 0) {
+            _log('JWT token is expired. Triggering silent refresh before logout.');
+            _onTokenExpired();
+          } else {
+            scheduleWithCap(actualRemaining);
+          }
+        });
+      }
+    }
+
     final remaining = expiryDate.difference(DateTime.now().toUtc());
     _log('JWT expiry time: ${expiryDate.toIso8601String()} (remaining: ${remaining.inSeconds}s)');
 
@@ -447,10 +468,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _onTokenExpired();
       return true;
     } else {
-      _expiryTimer = Timer(remaining, () {
-        _log('Proactive JWT expiry timer fired after ${remaining.inSeconds}s idle.');
-        _onTokenExpired();
-      });
+      scheduleWithCap(remaining);
       return false;
     }
   }
