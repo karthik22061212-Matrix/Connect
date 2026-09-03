@@ -138,13 +138,9 @@ class MainConsumerDashboard extends StatefulWidget {
 class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   static const String _baseUrl = String.fromEnvironment('API_BASE_URL');
 
-  // DEV NOTE: Dual user slot switcher (_user1Session vs _user2Session) is for dev/e2e test harness
-  // convenience only on web. Will be removed once single-account-per-device persistent auth is standard.
-  UserSession? _user1Session;
-  UserSession? _user2Session;
-  int _activeSessionIndex = 1;
+  UserSession? _currentSession;
 
-  UserSession? get currentSession => _activeSessionIndex == 1 ? _user1Session : _user2Session;
+  UserSession? get currentSession => _currentSession;
 
   int _selectedNavIndex = 0;
 
@@ -609,7 +605,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Timer? _expiryTimer;
-  final Map<int, Future<bool>?> _refreshFutures = {};
+  Future<bool>? _refreshFuture;
 
   String _decodeBase64(String str) {
     String output = str.replaceAll('-', '+').replaceAll('_', '/');
@@ -705,15 +701,14 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Future<bool> _attemptSilentRefresh() {
-    final slot = _activeSessionIndex;
-    if (_refreshFutures[slot] != null) {
-      _log('Silent refresh already in flight for slot $slot. Waiting for completion.');
-      return _refreshFutures[slot]!;
+    if (_refreshFuture != null) {
+      _log('Silent refresh already in flight. Waiting for completion.');
+      return _refreshFuture!;
     }
     final future = _executeSilentRefresh();
-    _refreshFutures[slot] = future;
+    _refreshFuture = future;
     return future.whenComplete(() {
-      _refreshFutures[slot] = null;
+      _refreshFuture = null;
     });
   }
 
@@ -724,7 +719,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       return false;
     }
 
-    _log('Attempting silent token refresh for slot $_activeSessionIndex (@${session.handle})...');
+    _log('Attempting silent token refresh (@${session.handle})...');
     try {
       final res = await http.post(
         Uri.parse('$_baseUrl/api/v1/auth/refresh'),
@@ -744,16 +739,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         );
 
         if (updatedSession.token.isNotEmpty && updatedSession.refreshToken.isNotEmpty) {
-          _saveSessionToLocalStorage(updatedSession, _activeSessionIndex);
+          _saveSessionToLocalStorage(updatedSession);
           setState(() {
-            if (_activeSessionIndex == 1) {
-              _user1Session = updatedSession;
-            } else {
-              _user2Session = updatedSession;
-            }
+            _currentSession = updatedSession;
           });
           _scheduleExpiryTimer(updatedSession.token);
-          _log('Silent refresh successful for slot $_activeSessionIndex. Access & refresh tokens rotated.');
+          _log('Silent refresh successful. Access & refresh tokens rotated.');
           return true;
         }
       }
@@ -784,9 +775,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   // --- LocalStorage Session Persistence Helpers ---
-  void _saveSessionToLocalStorage(UserSession session, [int? slot]) {
-    final s = slot ?? _activeSessionIndex;
-    final prefix = s == 2 ? 'connect_u2_' : 'connect_';
+  void _saveSessionToLocalStorage(UserSession session) {
+    const prefix = 'connect_';
     try {
       html.window.localStorage['${prefix}token'] = session.token;
       html.window.localStorage['${prefix}refresh_token'] = session.refreshToken;
@@ -800,48 +790,24 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   void _loadSessionFromLocalStorage() {
     try {
-      // Slot 1
-      final token1 = html.window.localStorage['connect_token'];
-      final refresh1 = html.window.localStorage['connect_refresh_token'] ?? '';
-      final id1 = html.window.localStorage['connect_id'];
-      final email1 = html.window.localStorage['connect_email'];
-      final handle1 = html.window.localStorage['connect_handle'];
+      final token = html.window.localStorage['connect_token'];
+      final refresh = html.window.localStorage['connect_refresh_token'] ?? '';
+      final id = html.window.localStorage['connect_id'];
+      final email = html.window.localStorage['connect_email'];
+      final handle = html.window.localStorage['connect_handle'];
 
-      if (token1 != null && token1.isNotEmpty && handle1 != null && handle1.isNotEmpty) {
-        _user1Session = UserSession(
-          token: token1,
-          refreshToken: refresh1,
-          id: id1 ?? '',
-          email: email1 ?? '',
-          handle: handle1,
+      if (token != null && token.isNotEmpty && handle != null && handle.isNotEmpty) {
+        _currentSession = UserSession(
+          token: token,
+          refreshToken: refresh,
+          id: id ?? '',
+          email: email ?? '',
+          handle: handle,
         );
       }
 
-      // Slot 2
-      final token2 = html.window.localStorage['connect_u2_token'];
-      final refresh2 = html.window.localStorage['connect_u2_refresh_token'] ?? '';
-      final id2 = html.window.localStorage['connect_u2_id'];
-      final email2 = html.window.localStorage['connect_u2_email'];
-      final handle2 = html.window.localStorage['connect_u2_handle'];
-
-      if (token2 != null && token2.isNotEmpty && handle2 != null && handle2.isNotEmpty) {
-        _user2Session = UserSession(
-          token: token2,
-          refreshToken: refresh2,
-          id: id2 ?? '',
-          email: email2 ?? '',
-          handle: handle2,
-        );
-      }
-
-      if (_user1Session != null) {
-        _activeSessionIndex = 1;
-        _scheduleExpiryTimer(_user1Session!.token);
-        _connectSignalR();
-        _refreshActiveTabData();
-      } else if (_user2Session != null) {
-        _activeSessionIndex = 2;
-        _scheduleExpiryTimer(_user2Session!.token);
+      if (_currentSession != null) {
+        _scheduleExpiryTimer(_currentSession!.token);
         _connectSignalR();
         _refreshActiveTabData();
       }
@@ -850,9 +816,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  void _clearSessionFromLocalStorage([int? slot]) {
-    final s = slot ?? _activeSessionIndex;
-    final prefix = s == 2 ? 'connect_u2_' : 'connect_';
+  void _clearSessionFromLocalStorage() {
+    const prefix = 'connect_';
     try {
       html.window.localStorage.remove('${prefix}token');
       html.window.localStorage.remove('${prefix}refresh_token');
@@ -867,14 +832,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   void _handle401() {
     _expiryTimer?.cancel();
     _expiryTimer = null;
-    _clearSessionFromLocalStorage(_activeSessionIndex);
+    _clearSessionFromLocalStorage();
     _hubConnection?.stop();
     setState(() {
-      if (_activeSessionIndex == 1) {
-        _user1Session = null;
-      } else {
-        _user2Session = null;
-      }
+      _currentSession = null;
       _isHubConnected = false;
       _authSuccessMessage = null;
       _authErrorMessage = null;
@@ -907,19 +868,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     }
 
-    _clearSessionFromLocalStorage(_activeSessionIndex);
+    _clearSessionFromLocalStorage();
     _hubConnection?.stop();
     setState(() {
-      if (_activeSessionIndex == 1) {
-        _user1Session = null;
-      } else {
-        _user2Session = null;
-      }
+      _currentSession = null;
       _isHubConnected = false;
       _authSuccessMessage = 'Logged out successfully.';
       _authErrorMessage = null;
     });
-    _log('Logged out slot $_activeSessionIndex and cleared localStorage session');
+    _log('Logged out and cleared localStorage session');
   }
 
   @override
@@ -1387,7 +1344,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       setState(() {
         _isHubConnected = true;
       });
-      _log('SignalR Connected as User ${_activeSessionIndex} (${session.handle})');
+      _log('SignalR Connected as User (${session.handle})');
     } catch (e) {
       setState(() {
         _isHubConnected = false;
@@ -1452,7 +1409,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<void> _registerUser(int sessionSlot) async {
+  Future<void> _registerUser() async {
     setState(() {
       _authErrorMessage = null;
       _authSuccessMessage = null;
@@ -1492,7 +1449,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         body: jsonEncode(body),
       );
 
-      _log('Register User Slot $sessionSlot -> Status ${res.statusCode}: ${res.body}');
+      _log('Register User -> Status ${res.statusCode}: ${res.body}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -1500,12 +1457,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _saveSessionToLocalStorage(session);
         _scheduleExpiryTimer(session.token);
         setState(() {
-          if (sessionSlot == 1) {
-            _user1Session = session;
-          } else {
-            _user2Session = session;
-          }
-          _activeSessionIndex = sessionSlot;
+          _currentSession = session;
           _authSuccessMessage = 'Registered and logged in as @${session.handle}!';
         });
         await _connectSignalR();
@@ -1535,7 +1487,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<void> _loginUser(int sessionSlot) async {
+  Future<void> _loginUser() async {
     setState(() {
       _authErrorMessage = null;
       _authSuccessMessage = null;
@@ -1569,7 +1521,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         body: jsonEncode(body),
       );
 
-      _log('Login Slot $sessionSlot -> Status ${res.statusCode}: ${res.body}');
+      _log('Login -> Status ${res.statusCode}: ${res.body}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -1577,12 +1529,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _saveSessionToLocalStorage(session);
         _scheduleExpiryTimer(session.token);
         setState(() {
-          if (sessionSlot == 1) {
-            _user1Session = session;
-          } else {
-            _user2Session = session;
-          }
-          _activeSessionIndex = sessionSlot;
+          _currentSession = session;
           _authSuccessMessage = 'Logged in successfully as @${session.handle}!';
         });
         await _connectSignalR();
@@ -2102,25 +2049,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     _fetchConnections();
     _fetchCallHistory();
     _fetchBlockedUsers();
-  }
-
-  void _switchSession(int slot) async {
-    setState(() {
-      _activeSessionIndex = slot;
-    });
-    _log('Switched Active Session Slot to User $slot (${currentSession?.handle ?? 'Logged Out'})');
-    if (currentSession != null) {
-      _scheduleExpiryTimer(currentSession!.token);
-      await _connectSignalR();
-      _refreshActiveTabData();
-    } else {
-      _expiryTimer?.cancel();
-      _expiryTimer = null;
-      _hubConnection?.stop();
-      setState(() {
-        _isHubConnected = false;
-      });
-    }
   }
 
   void _showProfilePanelModal() {
@@ -2654,7 +2582,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _isAuthLoading ? null : () => _loginUser(_activeSessionIndex),
+              onPressed: _isAuthLoading ? null : () => _loginUser(),
               child: _isAuthLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text('Log In'),
@@ -2745,7 +2673,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _isAuthLoading ? null : () => _registerUser(_activeSessionIndex),
+              onPressed: _isAuthLoading ? null : () => _registerUser(),
               child: _isAuthLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text('Create Account'),
@@ -3786,38 +3714,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFF94A3B8)),
                   ),
                 ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF334155)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline, color: Color(0xFF38BDF8), size: 18),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Dual User Slot Switcher (Dev Harness Convenience)',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                  ),
-                ),
-                ChoiceChip(
-                  label: Text('User 1 (${_user1Session?.handle ?? "Empty"})'),
-                  selected: _activeSessionIndex == 1,
-                  onSelected: (_) => _switchSession(1),
-                ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: Text('User 2 (${_user2Session?.handle ?? "Empty"})'),
-                  selected: _activeSessionIndex == 2,
-                  onSelected: (_) => _switchSession(2),
-                ),
               ],
             ),
           ),
