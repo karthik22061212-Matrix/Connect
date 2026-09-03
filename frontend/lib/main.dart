@@ -429,6 +429,25 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     ''';
   }
 
+  Future<Map<String, dynamic>?> _fetchTurnCredentials() async {
+    _log('TURN credential request started');
+    try {
+      final res = await _authenticatedApiCall((token) => http.get(
+        Uri.parse('$_baseUrl/api/v1/turn/credentials'),
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res != null && res.statusCode == 200) {
+        _log('TURN credential request succeeded');
+        return jsonDecode(res.body);
+      } else {
+        _log('TURN credential request failed (Status: ${res?.statusCode}). Proceeding with STUN only.');
+      }
+    } catch (e) {
+      _log('TURN credential request encountered an exception. Proceeding with STUN only.');
+    }
+    return null;
+  }
+
   Future<void> _ensureWebRTCSetup() {
     if (_peerConnection != null) return Future.value();
     if (_webRTCSetupFuture != null) return _webRTCSetupFuture!;
@@ -442,12 +461,39 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     _tsWebRTCSetupStarted = DateTime.now().millisecondsSinceEpoch;
     _log('Initializing RTCPeerConnection... [ts: $_tsWebRTCSetupStarted]');
     _updateWebRTCDebugPanel();
+
+    final List<Map<String, dynamic>> iceServers = [
+      {
+        'urls': 'stun:stun.l.google.com:19302',
+      },
+    ];
+
+    final turnCreds = await _fetchTurnCredentials();
+    if (currentGeneration != _webRTCSetupGeneration) {
+      _log('WebRTC setup cancelled during TURN credential fetch.');
+      return;
+    }
+
+    if (turnCreds != null) {
+      final uris = (turnCreds['uris'] as List<dynamic>?)?.cast<String>() ?? [];
+      final username = turnCreds['username']?.toString();
+      final password = turnCreds['password']?.toString();
+      final ttl = turnCreds['ttl'];
+
+      if (uris.isNotEmpty && username != null && password != null) {
+        _log('number of returned TURN URIs: ${uris.length}, TTL: $ttl');
+        iceServers.add({
+          'urls': uris,
+          'username': username,
+          'credential': password,
+        });
+      }
+    }
+
+    _log('ICE server count: ${iceServers.length}');
+
     final configuration = <String, dynamic>{
-      'iceServers': [
-        {
-          'urls': 'stun:stun.l.google.com:19302',
-        },
-      ],
+      'iceServers': iceServers,
     };
 
     final pc = await createPeerConnection(configuration);
