@@ -158,6 +158,14 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   String? _pendingRemoteOfferSdp;
   bool _needsToSendOffer = false;
 
+  // WebRTC Recovery State
+  bool _isRecovering = false;
+  int _recoveryAttempts = 0;
+  Timer? _recoveryTimer;
+  Timer? _disconnectGraceTimer;
+  static const int _maxRecoveryAttempts = 3;
+  static const int _recoveryTimeoutSeconds = 15;
+
   // Audio Quality Timing Diagnostics
   int? _tsCallAccepted;
   int? _tsWebRTCSetupStarted;
@@ -516,15 +524,52 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _updateWebRTCDebugPanel(connState: state.toString());
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _startStatsTimer();
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _disconnectGraceTimer?.cancel();
+        _triggerRecovery();
       }
     };
 
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
       final now = DateTime.now().millisecondsSinceEpoch;
       _log('WebRTC ICE Connection State changed to: $state [ts: $now]');
-      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
-        _tsIceConnected = now;
+
+
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+          _tsIceConnected = now;
+        }
+        _disconnectGraceTimer?.cancel();
+        if (_isRecovering) {
+          _isRecovering = false;
+          _recoveryAttempts = 0;
+          _recoveryTimer?.cancel();
+          if (mounted) {
+            setState(() {
+              _callStatusText = 'Connection restored';
+            });
+            Timer(const Duration(seconds: 2), () {
+              if (mounted && _isActiveCall && !_isRecovering) {
+                setState(() {
+                  _callStatusText = 'Connected';
+                });
+              }
+            });
+          }
+        }
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _disconnectGraceTimer?.cancel();
+        _triggerRecovery();
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+        _disconnectGraceTimer?.cancel();
+        _disconnectGraceTimer = Timer(const Duration(seconds: 3), () {
+          if (_peerConnection != null) {
+            _triggerRecovery();
+          }
+        });
       }
+
       _updateWebRTCDebugPanel(iceState: state.toString());
     };
 
@@ -1913,10 +1958,58 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
+  Future<void> _triggerRecovery() async {
+    if (_isRecovering || _peerConnection == null || _activeCallId == null) {
+      return;
+    }
+
+    if (_recoveryAttempts >= _maxRecoveryAttempts) {
+      _log('Recovery attempts exhausted. Terminating call.');
+      await _endCall();
+      return;
+    }
+
+    _isRecovering = true;
+    _recoveryAttempts++;
+
+    if (mounted) {
+      setState(() {
+        _callStatusText = 'Reconnecting... (Attempt $_recoveryAttempts/$_maxRecoveryAttempts)';
+      });
+    }
+
+    _log('Initiating WebRTC recovery attempt $_recoveryAttempts... [ts: ${DateTime.now().millisecondsSinceEpoch}]');
+
+    try {
+      _tsOfferCreationStarted = DateTime.now().millisecondsSinceEpoch;
+      final offer = await _peerConnection!.createOffer({'iceRestart': true});
+      await _peerConnection!.setLocalDescription(offer);
+
+      if (_hubConnection != null) {
+        _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
+      }
+
+      _recoveryTimer?.cancel();
+      _recoveryTimer = Timer(const Duration(seconds: _recoveryTimeoutSeconds), () {
+        _log('Recovery attempt $_recoveryAttempts timed out.');
+        _isRecovering = false;
+        _triggerRecovery();
+      });
+    } catch (e) {
+      _log('Failed to initiate recovery: $e');
+      _isRecovering = false;
+      _triggerRecovery();
+    }
+  }
+
   Future<void> _teardownWebRTC({bool preserveCallState = false}) async {
     _printCallSummary();
     _statsTimer?.cancel();
     _statsTimer = null;
+    _isRecovering = false;
+    _recoveryAttempts = 0;
+    _recoveryTimer?.cancel();
+    _disconnectGraceTimer?.cancel();
     _log('Tearing down WebRTC...');
 
     _webRTCSetupGeneration++; // Invalidate any pending setup
