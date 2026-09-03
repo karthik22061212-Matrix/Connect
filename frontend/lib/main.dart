@@ -557,6 +557,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               }
             });
           }
+        } else {
+          if (mounted && _isActiveCall && _callStatusText == 'Retrying microphone...') {
+            setState(() {
+              _callStatusText = 'Connected';
+            });
+          }
         }
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         _disconnectGraceTimer?.cancel();
@@ -648,6 +654,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           if (mounted && _isActiveCall) {
              setState(() {
                _micErrorCategory = 'permissionDenied';
+               _callStatusText = 'Microphone Disconnected';
              });
              _needsToSendOffer = true;
              _teardownWebRTC(preserveCallState: true);
@@ -676,6 +683,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (mounted) {
         setState(() {
           _micErrorCategory = category;
+          _callStatusText = 'Microphone Error';
         });
       }
 
@@ -1006,6 +1014,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _handle401() {
+    _teardownWebRTC();
     _expiryTimer?.cancel();
     _expiryTimer = null;
     _clearSessionFromLocalStorage();
@@ -1027,6 +1036,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _logout() async {
+    _teardownWebRTC();
     _expiryTimer?.cancel();
     _expiryTimer = null;
 
@@ -1133,6 +1143,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   @override
   void dispose() {
+    _teardownWebRTC();
     _remoteRenderer?.dispose();
     _expiryTimer?.cancel();
     _expiryTimer = null;
@@ -1331,6 +1342,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('CallRejected', (args) async {
       _log('SignalR Event: CallRejected -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
       await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
@@ -1346,6 +1358,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('CallEnded', (args) async {
       _log('SignalR Event: CallEnded -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
       await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
@@ -1361,6 +1374,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('CallTimeout', (args) async {
       _log('SignalR Event: CallTimeout -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
       await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
@@ -1376,6 +1390,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('CalleeUnavailable', (args) async {
       _log('SignalR Event: CalleeUnavailable -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
       await _teardownWebRTC();
       setState(() {
         _isRinging = false;
@@ -1385,6 +1400,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _hubConnection!.on('CalleeBusy', (args) async {
       _log('SignalR Event: CalleeBusy -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
       await _teardownWebRTC();
       setState(() {
         _isRinging = false;
@@ -1427,6 +1443,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('SignalR Event: ReceiveWebRtcOffer -> $args');
       if (args != null && args.length >= 2) {
         final callId = args[0].toString();
+        if (_activeCallId == null || callId != _activeCallId) return;
         final sdp = args[1].toString();
         _pendingRemoteOfferSdp = sdp;
         _log('ReceiveWebRtcOffer: callId=$callId');
@@ -1444,6 +1461,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('SignalR Event: ReceiveWebRtcAnswer -> $args [ts: $_tsAnswerReceived]');
       if (args != null && args.length >= 2) {
         final callId = args[0].toString();
+        if (_activeCallId == null || callId != _activeCallId) return;
         _log('ReceiveWebRtcAnswer: callId=$callId');
         _log('ReceiveWebRtcAnswer: peer connection exists? ${_peerConnection != null}');
         if (_peerConnection != null) {
@@ -2017,12 +2035,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
+    
+    final pc = _peerConnection;
+    _peerConnection = null;
     try {
-      await _peerConnection?.close();
+      await pc?.close();
     } catch (e) {
       _log('Error closing peer connection: $e');
     }
-    _peerConnection = null;
+    
     _remoteRenderer?.srcObject = null;
 
     if (!preserveCallState) {
