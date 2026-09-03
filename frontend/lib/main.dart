@@ -154,6 +154,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   RTCVideoRenderer? _remoteRenderer;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
+  String? _micErrorCategory;
+  String? _pendingRemoteOfferSdp;
+  bool _needsToSendOffer = false;
+
   // Audio Quality Timing Diagnostics
   int? _tsCallAccepted;
   int? _tsWebRTCSetupStarted;
@@ -594,12 +598,44 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
 
       _localStream!.getAudioTracks().forEach((track) {
+        track.onEnded = () {
+          _log('Local audio track ended unexpectedly (e.g. mic unplugged or permission revoked).');
+          if (mounted && _isActiveCall) {
+             setState(() {
+               _micErrorCategory = 'permissionDenied';
+             });
+             _needsToSendOffer = true;
+             _teardownWebRTC(preserveCallState: true);
+          }
+        };
         _peerConnection!.addTrack(track, _localStream!);
       });
       _tsLocalTrackAdded = DateTime.now().millisecondsSinceEpoch;
       _log('Local mic stream attached to peer connection. [ts: $_tsLocalTrackAdded]');
     } catch (e) {
       _log('Failed to capture mic during WebRTC setup: $e');
+      final errorStr = e.toString().toLowerCase();
+      String category = 'genericMediaError';
+      if (errorStr.contains('notallowed') || errorStr.contains('permission denied') || errorStr.contains('denied') || errorStr.contains('not allowed')) {
+        category = 'permissionDenied';
+      } else if (errorStr.contains('notfound') || errorStr.contains('requested device not found') || errorStr.contains('no microphone')) {
+        category = 'noMicrophone';
+      } else if (errorStr.contains('notreadable') || errorStr.contains('could not start video source') || errorStr.contains('in use') || errorStr.contains('hardware')) {
+        category = 'microphoneInUse';
+      } else if (errorStr.contains('overconstrained')) {
+        category = 'microphoneUnavailable';
+      }
+
+      _log('Microphone error classified as: $category');
+
+      if (mounted) {
+        setState(() {
+          _micErrorCategory = category;
+        });
+      }
+
+      await _teardownWebRTC(preserveCallState: true);
+      return;
     }
   }
 
@@ -646,6 +682,55 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             behavior: SnackBarBehavior.floating,
           ),
         );
+      }
+    }
+  }
+
+  Future<void> _processPendingOfferCreation() async {
+    if (!_needsToSendOffer || _peerConnection == null || _activeCallId == null) return;
+
+    _tsOfferCreationStarted = DateTime.now().millisecondsSinceEpoch;
+    _log('Creating SDP Offer... [ts: $_tsOfferCreationStarted]');
+    RTCSessionDescription offer = await _peerConnection!.createOffer();
+    _tsOfferCreationCompleted = DateTime.now().millisecondsSinceEpoch;
+    _log('SDP Offer created. [ts: $_tsOfferCreationCompleted]');
+    await _peerConnection!.setLocalDescription(offer);
+    _log('Sending SDP Offer via SignalR...');
+    _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
+    _tsOfferSent = DateTime.now().millisecondsSinceEpoch;
+    _log('SDP Offer sent. [ts: $_tsOfferSent]');
+    _needsToSendOffer = false;
+  }
+
+  Future<void> _processPendingOffer() async {
+    if (_pendingRemoteOfferSdp == null || _peerConnection == null || _activeCallId == null) return;
+
+    _log('Setting Remote Description (Offer)...');
+    await _peerConnection!.setRemoteDescription(RTCSessionDescription(_pendingRemoteOfferSdp!, 'offer'));
+    _log('ReceiveWebRtcOffer: state transition -> setRemoteDescription(offer) succeeded.');
+    await _processPendingIceCandidates();
+
+    _log('Creating SDP Answer...');
+    RTCSessionDescription answer = await _peerConnection!.createAnswer();
+    await _peerConnection!.setLocalDescription(answer);
+
+    _log('Sending SDP Answer via SignalR...');
+    _hubConnection!.invoke('SendWebRtcAnswer', args: [_activeCallId!, answer.sdp!]);
+    _pendingRemoteOfferSdp = null;
+  }
+
+  Future<void> _retryMicSetup() async {
+    setState(() {
+      _micErrorCategory = null;
+      _callStatusText = 'Retrying microphone...';
+    });
+
+    await _ensureWebRTCSetup();
+    if (_peerConnection != null) {
+      if (_needsToSendOffer) {
+        await _processPendingOfferCreation();
+      } else if (_pendingRemoteOfferSdp != null) {
+        await _processPendingOffer();
       }
     }
   }
@@ -1160,6 +1245,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           _isRinging = false;
           _isActiveCall = false;
           _ringTimerSeconds = 15;
+          _micErrorCategory = null;
           _callStatusText = 'Incoming call from @$callerHandle';
         });
 
@@ -1191,18 +1277,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       });
       _startCallTimer();
 
+      _needsToSendOffer = true;
       await _ensureWebRTCSetup();
       if (_peerConnection != null) {
-        _tsOfferCreationStarted = DateTime.now().millisecondsSinceEpoch;
-        _log('Creating SDP Offer... [ts: $_tsOfferCreationStarted]');
-        RTCSessionDescription offer = await _peerConnection!.createOffer();
-        _tsOfferCreationCompleted = DateTime.now().millisecondsSinceEpoch;
-        _log('SDP Offer created. [ts: $_tsOfferCreationCompleted]');
-        await _peerConnection!.setLocalDescription(offer);
-        _log('Sending SDP Offer via SignalR...');
-        _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
-        _tsOfferSent = DateTime.now().millisecondsSinceEpoch;
-        _log('SDP Offer sent. [ts: $_tsOfferSent]');
+        await _processPendingOfferCreation();
       }
     });
 
@@ -1305,22 +1383,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (args != null && args.length >= 2) {
         final callId = args[0].toString();
         final sdp = args[1].toString();
+        _pendingRemoteOfferSdp = sdp;
         _log('ReceiveWebRtcOffer: callId=$callId');
 
         await _ensureWebRTCSetup();
         _log('ReceiveWebRtcOffer: peer connection exists? ${_peerConnection != null}');
         if (_peerConnection != null) {
-          _log('Setting Remote Description (Offer)...');
-          await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
-          _log('ReceiveWebRtcOffer: state transition -> setRemoteDescription(offer) succeeded.');
-          await _processPendingIceCandidates();
-
-          _log('Creating SDP Answer...');
-          RTCSessionDescription answer = await _peerConnection!.createAnswer();
-          await _peerConnection!.setLocalDescription(answer);
-
-          _log('Sending SDP Answer via SignalR...');
-          _hubConnection!.invoke('SendWebRtcAnswer', args: [callId, answer.sdp!]);
+          await _processPendingOffer();
         }
       }
     });
@@ -1796,6 +1865,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _callerOrCalleeName = targetHandle;
       _callStatusText = 'Initiating call to $targetHandle...';
       _ringTimerSeconds = 15;
+      _micErrorCategory = null;
     });
 
     _log('Initiating call via SignalR to $targetGuidId ($targetHandle)');
@@ -1843,7 +1913,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<void> _teardownWebRTC() async {
+  Future<void> _teardownWebRTC({bool preserveCallState = false}) async {
     _printCallSummary();
     _statsTimer?.cancel();
     _statsTimer = null;
@@ -1854,27 +1924,39 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
-    await _peerConnection?.close();
+    try {
+      await _peerConnection?.close();
+    } catch (e) {
+      _log('Error closing peer connection: $e');
+    }
     _peerConnection = null;
     _remoteRenderer?.srcObject = null;
-    _pendingIceCandidates.clear();
 
-    _tsCallAccepted = null;
-    _tsWebRTCSetupStarted = null;
-    _tsGetUserMediaStarted = null;
-    _tsLocalStreamReady = null;
-    _tsPeerConnectionCreated = null;
-    _tsLocalTrackAdded = null;
-    _tsOfferCreationStarted = null;
-    _tsOfferCreationCompleted = null;
-    _tsOfferSent = null;
-    _tsAnswerReceived = null;
-    _tsIceGatheringStarted = null;
-    _tsIceGatheringCompleted = null;
-    _tsIceConnected = null;
-    _tsRemoteTrackReceived = null;
-    _tsRemoteStreamAttached = null;
-    _tsRemotePlaybackStarted = null;
+    if (!preserveCallState) {
+      _pendingIceCandidates.clear();
+      _pendingRemoteOfferSdp = null;
+      _needsToSendOffer = false;
+      _micErrorCategory = null;
+    }
+
+    if (!preserveCallState) {
+      _tsCallAccepted = null;
+      _tsWebRTCSetupStarted = null;
+      _tsGetUserMediaStarted = null;
+      _tsLocalStreamReady = null;
+      _tsPeerConnectionCreated = null;
+      _tsLocalTrackAdded = null;
+      _tsOfferCreationStarted = null;
+      _tsOfferCreationCompleted = null;
+      _tsOfferSent = null;
+      _tsAnswerReceived = null;
+      _tsIceGatheringStarted = null;
+      _tsIceGatheringCompleted = null;
+      _tsIceConnected = null;
+      _tsRemoteTrackReceived = null;
+      _tsRemoteStreamAttached = null;
+      _tsRemotePlaybackStarted = null;
+    }
   }
 
   Future<void> _endCall() async {
@@ -3377,7 +3459,42 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             'Audio controls inert (Sprint 7.6 audio integration)',
             style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontStyle: FontStyle.italic),
           ),
-          const SizedBox(height: 48),
+          if (_micErrorCategory != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(top: 24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF450a0a),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFdc2626)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.mic_off, color: Color(0xFFef4444), size: 32),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Microphone Access Required',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _micErrorCategory == 'noMicrophone'
+                        ? 'No microphone was found on this device.\nPlease plug in a microphone and try again.'
+                        : 'Connect needs microphone access for a voice call.\nThe browser/device microphone permission must be enabled.\nPlease enable it and try again.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFFfca5a5), fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _retryMicSetup,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry Microphone'),
+                  ),
+                ],
+              ),
+            )
+          else
+            const SizedBox(height: 48),
           if (_isIncomingCall)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
