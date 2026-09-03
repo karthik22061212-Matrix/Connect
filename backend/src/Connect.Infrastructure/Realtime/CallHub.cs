@@ -25,6 +25,7 @@ public class CallHub : Hub<ICallHubClient>
     private readonly ISender _mediator;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<CallHub> _logger;
+    private readonly Connect.Application.Common.Diagnostics.IDiagnosticLogService _diagnosticLogService;
 
     public CallHub(
         IPresenceTracker presenceTracker,
@@ -32,7 +33,8 @@ public class CallHub : Hub<ICallHubClient>
         IDateTimeProvider dateTimeProvider,
         ISender mediator,
         IServiceScopeFactory serviceScopeFactory,
-        ILogger<CallHub> logger)
+        ILogger<CallHub> logger,
+        Connect.Application.Common.Diagnostics.IDiagnosticLogService diagnosticLogService)
     {
         _presenceTracker = presenceTracker;
         _unitOfWork = unitOfWork;
@@ -40,11 +42,25 @@ public class CallHub : Hub<ICallHubClient>
         _mediator = mediator;
         _serviceScopeFactory = serviceScopeFactory;
         _logger = logger;
+        _diagnosticLogService = diagnosticLogService;
     }
 
     public override async Task OnConnectedAsync()
     {
         var userId = GetUserId();
+
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = "Info",
+            Component = "CallHub",
+            EventName = "SignalRConnected",
+            Message = $"SignalR Connected. ConnectionId: {Context.ConnectionId}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId
+        });
+
         var isFirstConnection = await _presenceTracker.UserConnectedAsync(userId, Context.ConnectionId);
 
         if (isFirstConnection)
@@ -66,6 +82,19 @@ public class CallHub : Hub<ICallHubClient>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var userId = GetUserId();
+
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = exception == null ? "Info" : "Error",
+            Component = "CallHub",
+            EventName = "SignalRDisconnected",
+            Message = $"SignalR Disconnected. ConnectionId: {Context.ConnectionId}. Exception: {exception?.Message}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId
+        });
+
         var isLastConnection = await _presenceTracker.UserDisconnectedAsync(userId, Context.ConnectionId);
 
         if (isLastConnection)
@@ -146,6 +175,20 @@ public class CallHub : Hub<ICallHubClient>
     public async Task RespondToCall(Guid callId, bool accepted)
     {
         var userId = GetUserId();
+
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = "Info",
+            Component = "CallHub",
+            EventName = accepted ? "CallAccepted" : "CallRejected",
+            Message = $"User {userId} {(accepted ? "accepted" : "rejected")} call {callId}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId,
+            CallId = callId.ToString()
+        });
+
         _logger.LogInformation("RespondToCall invoked for CallId: {CallId} by UserId: {UserId} with Accepted: {Accepted}", callId, userId, accepted);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null || call.CalleeId != userId)
@@ -215,6 +258,20 @@ public class CallHub : Hub<ICallHubClient>
 
     public async Task EndCall(Guid callId)
     {
+        var userId = GetUserId();
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = "Info",
+            Component = "CallHub",
+            EventName = "CallEnded",
+            Message = $"User {userId} ended call {callId}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId,
+            CallId = callId.ToString()
+        });
+
         try
         {
             var result = await _mediator.Send(new EndCallCommand(callId));

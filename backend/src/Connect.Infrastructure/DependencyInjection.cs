@@ -1,6 +1,8 @@
 using System.Text;
 using Connect.Application.Common.Interfaces;
 using Connect.Infrastructure.Identity;
+using Connect.Application.Common.Diagnostics;
+using Connect.Infrastructure.Diagnostics;
 using Connect.Infrastructure.Persistence;
 using Connect.Infrastructure.Persistence.Repositories;
 using Connect.Infrastructure.Services;
@@ -41,6 +43,7 @@ public static class DependencyInjection
         services.AddSingleton<IPresenceTracker, Realtime.PresenceTracker>();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddSingleton<IDiagnosticLogService, InMemoryDiagnosticLogService>();
 
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();

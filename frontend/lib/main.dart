@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:signalr_netcore/signalr_client.dart';
+import 'package:flutter/foundation.dart';
+import 'services/diagnostic_logger.dart';
 
 void main() {
   runApp(const ConnectApp());
@@ -374,24 +376,23 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   final TextEditingController _reportReasonController = TextEditingController();
   final TextEditingController _reportNoteController = TextEditingController();
 
-  final List<String> _consoleLogs = [];
   bool _showDevConsole = false;
 
   void _log(String message) {
-    final timestamp = DateTime.now().toIso8601String().substring(11, 19);
-    setState(() {
-      _consoleLogs.insert(0, '[$timestamp] $message');
-    });
+    DiagnosticLogger().log(message);
+    if (!kReleaseMode) {
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 
   void _downloadLogs() {
     final timestamp = DateTime.now().toIso8601String().replaceAll(':', '').replaceAll('-', '').replaceFirst('T', '-').split('.')[0];
     final filename = 'connect-developer-logs-$timestamp.txt';
 
-    final jwtRegex = RegExp(r'eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+');
-    final logsContent = _consoleLogs.reversed.map((log) {
-      String redacted = log.replaceAll(jwtRegex, '[REDACTED_TOKEN]');
-      return redacted;
+    final logsContent = DiagnosticLogger().getLogs().reversed.map((logEvent) {
+      return '[${logEvent.timestamp}] ${logEvent.message}';
     }).join('\n');
 
     final bytes = utf8.encode(logsContent);
@@ -970,6 +971,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     } catch (e) {
       _log('Error saving session to localStorage: $e');
     }
+    DiagnosticLogger().setContext(
+      userId: session.id,
+    );
   }
 
   void _loadSessionFromLocalStorage() {
@@ -987,6 +991,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           id: id ?? '',
           email: email ?? '',
           handle: handle,
+        );
+        DiagnosticLogger().setContext(
+          userId: id,
         );
       }
 
@@ -1036,6 +1043,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _logout() async {
+    DiagnosticLogger().clearSession();
     _teardownWebRTC();
     _expiryTimer?.cancel();
     _expiryTimer = null;
@@ -1068,6 +1076,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   @override
   void initState() {
     super.initState();
+    DiagnosticLogger().init(apiBaseUrl: '$_baseUrl/api/v1');
     _remoteRenderer = RTCVideoRenderer();
     _remoteRenderer!.initialize().then((_) {
       if (mounted) setState(() {});
@@ -2417,16 +2426,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           child: Stack(
             children: [
               Center(child: SingleChildScrollView(child: _buildAuthCard())),
-              Positioned(
-                bottom: 16,
-                right: 16,
-                child: FloatingActionButton.small(
-                  onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
-                  backgroundColor: const Color(0xFF334155),
-                  child: const Icon(Icons.developer_mode, color: Colors.white),
+              if (!kReleaseMode)
+                Positioned(
+                  bottom: 16,
+                  right: 16,
+                  child: FloatingActionButton.small(
+                    onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
+                    backgroundColor: const Color(0xFF334155),
+                    child: const Icon(Icons.developer_mode, color: Colors.white),
+                  ),
                 ),
-              ),
-              if (_showDevConsole) _buildDevConsoleSheet(),
+              if (!kReleaseMode && _showDevConsole) _buildDevConsoleSheet(),
             ],
           ),
         ),
@@ -2489,15 +2499,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(
-              _showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined,
-              size: 18,
-              color: const Color(0xFF94A3B8),
+          if (!kReleaseMode)
+            IconButton(
+              icon: Icon(
+                _showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined,
+                size: 18,
+                color: const Color(0xFF94A3B8),
+              ),
+              tooltip: 'Developer Tools',
+              onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
             ),
-            tooltip: 'Developer Tools',
-            onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
-          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFF64748B)),
             tooltip: 'Log Out',
@@ -2580,7 +2591,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           if (_isIncomingCall || _isActiveCall)
             Positioned.fill(child: _buildFullCallOverlay()),
-          if (_showDevConsole) _buildDevConsoleSheet(),
+          if (!kReleaseMode && _showDevConsole) _buildDevConsoleSheet(),
           if (_remoteRenderer != null)
             SizedBox(width: 1, height: 1, child: RTCVideoView(_remoteRenderer!)),
         ],
@@ -3999,18 +4010,22 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Console Audit Trail:', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: _downloadLogs,
-                    child: const Text('Download Logs', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 11)),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() => _consoleLogs.clear()),
-                    child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                  ),
-                ],
-              ),
+              if (!kReleaseMode)
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: _downloadLogs,
+                      child: const Text('Download Logs', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 11)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                         DiagnosticLogger().clearSession();
+                         setState((){});
+                      },
+                      child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                    ),
+                  ],
+                ),
             ],
           ),
           Expanded(
@@ -4022,10 +4037,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 border: Border.all(color: const Color(0xFF1E293B)),
               ),
               child: ListView.builder(
-                itemCount: _consoleLogs.length,
+                itemCount: DiagnosticLogger().getLogs().length,
                 itemBuilder: (context, index) {
+                  final logEvents = DiagnosticLogger().getLogs().reversed.toList();
+                  final log = logEvents[index];
                   return SelectableText(
-                    _consoleLogs[index],
+                    '[${log.timestamp}] ${log.message}',
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFF4ADE80)),
                   );
                 },
