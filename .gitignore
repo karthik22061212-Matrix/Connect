@@ -2,11 +2,15 @@
 infra/*.env
 infra/azure-deployment-info.env
 *.env
+appsettings.Development.json
 
 # Build & Compiler outputs
 bin/
 obj/
 publish/
+backend/publish/
+backend/publish_linux/
+backend/publish_linux_api/
 .vs/
 .idea/
 .vscode/
@@ -37,8 +41,11 @@ scratch_*
 # Leftover deploy archives
 *.zip
 
-# Ignore specific build artifacts and test junk
-backend/publish_linux/
-backend/publish_linux_api/
+# Logs
+logs/
 logs_extracted/
+backend/src/Connect.Api/logs/
+backend/logs/
+
+# Ignore specific build artifacts and test junk
 payload.json

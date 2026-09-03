@@ -55,5 +55,5 @@ jobs:
       - name: Build Flutter Web app for deployment
         run: |
           cd frontend
-          flutter build web --dart-define=API_BASE_URL=https://connect-api-5633.azurewebsites.net
+          flutter build web --dart-define=API_BASE_URL=${{ vars.API_BASE_URL }}
 

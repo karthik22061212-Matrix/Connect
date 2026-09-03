@@ -136,10 +136,7 @@ class MainConsumerDashboard extends StatefulWidget {
 }
 
 class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
-  static const String _baseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://localhost:5200',
-  );
+  static const String _baseUrl = String.fromEnvironment('API_BASE_URL');
 
   // DEV NOTE: Dual user slot switcher (_user1Session vs _user2Session) is for dev/e2e test harness
   // convenience only on web. Will be removed once single-account-per-device persistent auth is standard.
@@ -156,8 +153,135 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
+  Future<void>? _webRTCSetupFuture;
+  int _webRTCSetupGeneration = 0;
   RTCVideoRenderer? _remoteRenderer;
   final List<RTCIceCandidate> _pendingIceCandidates = [];
+
+  // Audio Quality Timing Diagnostics
+  int? _tsCallAccepted;
+  int? _tsWebRTCSetupStarted;
+  int? _tsGetUserMediaStarted;
+  int? _tsLocalStreamReady;
+  int? _tsPeerConnectionCreated;
+  int? _tsLocalTrackAdded;
+  int? _tsOfferCreationStarted;
+  int? _tsOfferCreationCompleted;
+  int? _tsOfferSent;
+  int? _tsAnswerReceived;
+  int? _tsIceGatheringStarted;
+  int? _tsIceGatheringCompleted;
+  int? _tsIceConnected;
+  int? _tsRemoteTrackReceived;
+  int? _tsRemoteStreamAttached;
+  int? _tsRemotePlaybackStarted;
+  Timer? _statsTimer;
+
+  void _startStatsTimer() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (_peerConnection == null) return;
+      try {
+        final stats = await _peerConnection!.getStats();
+
+        String? selectedPairId;
+        for (var report in stats) {
+          if (report.type == 'transport') {
+            selectedPairId = report.values['selectedCandidatePairId']?.toString();
+          }
+        }
+
+        StatsReport? activePair;
+        Map<String, dynamic> localCandidates = {};
+        Map<String, dynamic> remoteCandidates = {};
+
+        for (var report in stats) {
+          if (report.type == 'local-candidate') {
+            localCandidates[report.id] = report.values;
+          } else if (report.type == 'remote-candidate') {
+            remoteCandidates[report.id] = report.values;
+          } else if (report.type == 'candidate-pair') {
+            bool isSelected = (selectedPairId != null && report.id == selectedPairId) ||
+                              report.values['nominated'] == true ||
+                              report.values['selected'] == true;
+            if (isSelected) {
+              activePair = report;
+            }
+          }
+        }
+
+        for (var report in stats) {
+          if (report.type == 'inbound-rtp' && report.values['kind'] == 'audio') {
+            final packetsReceived = report.values['packetsReceived'];
+            final packetsLost = report.values['packetsLost'];
+            final jitter = report.values['jitter'];
+            final bytesReceived = report.values['bytesReceived'];
+            _log('Audio inbound stats - Received: $packetsReceived, Lost: $packetsLost, Jitter: $jitter, Bytes: $bytesReceived');
+          } else if (report.type == 'outbound-rtp' && report.values['kind'] == 'audio') {
+            final packetsSent = report.values['packetsSent'];
+            final bytesSent = report.values['bytesSent'];
+            _log('Audio outbound stats - Sent: $packetsSent, Bytes: $bytesSent');
+          }
+        }
+
+        if (activePair != null) {
+          final state = activePair.values['state'];
+          final currentRoundTripTime = activePair.values['currentRoundTripTime'];
+          final availableOutgoingBitrate = activePair.values['availableOutgoingBitrate'];
+          final nominated = activePair.values['nominated'] ?? activePair.values['selected'];
+
+          final localId = activePair.values['localCandidateId'];
+          final remoteId = activePair.values['remoteCandidateId'];
+
+          String localType = 'unknown';
+          String remoteType = 'unknown';
+          String protocol = 'unknown';
+
+          if (localId != null && localCandidates.containsKey(localId)) {
+            localType = localCandidates[localId]['candidateType']?.toString() ?? 'unknown';
+            protocol = localCandidates[localId]['protocol']?.toString() ?? 'unknown';
+          }
+          if (remoteId != null && remoteCandidates.containsKey(remoteId)) {
+            remoteType = remoteCandidates[remoteId]['candidateType']?.toString() ?? 'unknown';
+            if (protocol == 'unknown') {
+               protocol = remoteCandidates[remoteId]['protocol']?.toString() ?? 'unknown';
+            }
+          }
+
+          _log('Active ICE Pair - State: $state, LocalType: $localType, RemoteType: $remoteType, Protocol: $protocol, RTT: $currentRoundTripTime, Bitrate: $availableOutgoingBitrate, Nominated: $nominated');
+        }
+      } catch (e) {
+        _log('Failed to collect WebRTC stats: $e');
+      }
+    });
+  }
+
+  void _printCallSummary() {
+    if (_tsCallAccepted != null && _tsRemotePlaybackStarted != null) {
+      _log('--- Call Quality Timing Summary ---');
+
+      void logTiming(String label, int? start, int? end) {
+        if (start != null && end != null) {
+          if (end >= start) {
+            _log('$label: ${end - start}ms');
+          } else {
+            _log('$label: unavailable (out of order)');
+          }
+        }
+      }
+
+      logTiming('call accepted -> local stream ready', _tsCallAccepted, _tsLocalStreamReady ?? _tsCallAccepted);
+      logTiming('local stream ready -> offer created', _tsLocalStreamReady, _tsOfferCreationCompleted);
+      logTiming('offer sent -> answer received', _tsOfferSent, _tsAnswerReceived);
+      logTiming('answer received -> ICE connected', _tsAnswerReceived, _tsIceConnected);
+      logTiming('ICE connected -> remote track received', _tsIceConnected, _tsRemoteTrackReceived);
+      logTiming('remote track received -> remote playback started', _tsRemoteTrackReceived, _tsRemotePlaybackStarted);
+      logTiming('call accepted -> remote playback started', _tsCallAccepted, _tsRemotePlaybackStarted);
+      logTiming('ICE gathering time', _tsIceGatheringStarted, _tsIceGatheringCompleted);
+
+      _log('-----------------------------------');
+    }
+  }
 
   Future<void> _processPendingIceCandidates() async {
     if (_peerConnection == null) return;
@@ -252,6 +376,27 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
   }
 
+  void _downloadLogs() {
+    final timestamp = DateTime.now().toIso8601String().replaceAll(':', '').replaceAll('-', '').replaceFirst('T', '-').split('.')[0];
+    final filename = 'connect-developer-logs-$timestamp.txt';
+
+    final jwtRegex = RegExp(r'eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+');
+    final logsContent = _consoleLogs.reversed.map((log) {
+      String redacted = log.replaceAll(jwtRegex, '[REDACTED_TOKEN]');
+      return redacted;
+    }).join('\n');
+
+    final bytes = utf8.encode(logsContent);
+    final blob = html.Blob([bytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    html.AnchorElement(href: url)
+      ..setAttribute('download', filename)
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+  }
+
   html.DivElement? _debugPanel;
   String _debugConnState = 'unknown';
   String _debugIceState = 'unknown';
@@ -288,8 +433,18 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     ''';
   }
 
+  Future<void> _ensureWebRTCSetup() {
+    if (_peerConnection != null) return Future.value();
+    if (_webRTCSetupFuture != null) return _webRTCSetupFuture!;
+    _webRTCSetupFuture = _setupWebRTC();
+    return _webRTCSetupFuture!;
+  }
+
   Future<void> _setupWebRTC() async {
-    _log('Initializing RTCPeerConnection...');
+    final int currentGeneration = ++_webRTCSetupGeneration;
+
+    _tsWebRTCSetupStarted = DateTime.now().millisecondsSinceEpoch;
+    _log('Initializing RTCPeerConnection... [ts: $_tsWebRTCSetupStarted]');
     _updateWebRTCDebugPanel();
     final configuration = <String, dynamic>{
       'iceServers': [
@@ -298,44 +453,109 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         },
       ],
     };
-    _peerConnection = await createPeerConnection(configuration);
+
+    final pc = await createPeerConnection(configuration);
+    if (currentGeneration != _webRTCSetupGeneration) {
+      _log('WebRTC setup cancelled during PeerConnection creation.');
+      await pc.close();
+      return;
+    }
+
+    _peerConnection = pc;
+    _tsPeerConnectionCreated = DateTime.now().millisecondsSinceEpoch;
+    _log('PeerConnection created. [ts: $_tsPeerConnectionCreated]');
 
     _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-      _log('WebRTC Connection State changed to: $state');
+      _log('WebRTC Connection State changed to: $state [ts: ${DateTime.now().millisecondsSinceEpoch}]');
       _updateWebRTCDebugPanel(connState: state.toString());
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _startStatsTimer();
+      }
     };
 
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
-      _log('WebRTC ICE Connection State changed to: $state');
+      final now = DateTime.now().millisecondsSinceEpoch;
+      _log('WebRTC ICE Connection State changed to: $state [ts: $now]');
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+        _tsIceConnected = now;
+      }
       _updateWebRTCDebugPanel(iceState: state.toString());
+    };
+
+    _peerConnection!.onIceGatheringState = (RTCIceGatheringState state) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      _log('WebRTC ICE Gathering State changed to: $state [ts: $now]');
+      if (state == RTCIceGatheringState.RTCIceGatheringStateGathering) {
+        _tsIceGatheringStarted ??= now;
+      } else if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
+        _tsIceGatheringCompleted = now;
+      }
     };
 
     _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
       if (_activeCallId != null && _hubConnection != null) {
-        _log('Gathered ICE Candidate, sending to remote...');
+        _log('Gathered ICE Candidate, sending to remote... [ts: ${DateTime.now().millisecondsSinceEpoch}]');
         _hubConnection!.invoke('SendIceCandidate', args: [_activeCallId!, jsonEncode(candidate.toMap())]);
       }
     };
 
     _peerConnection!.onTrack = (RTCTrackEvent event) {
-      _log('WebRTC Event: onTrack fired, track kind=${event.track.kind}, stream count=${event.streams.length}');
+      _tsRemoteTrackReceived = DateTime.now().millisecondsSinceEpoch;
+      _log('WebRTC Event: onTrack fired, track kind=${event.track.kind}, stream count=${event.streams.length} [ts: $_tsRemoteTrackReceived]');
       _updateWebRTCDebugPanel(onTrackFired: true, trackKind: event.track.kind ?? 'unknown');
       if (event.track.kind == 'audio' && event.streams.isNotEmpty) {
         _remoteRenderer?.srcObject = event.streams[0];
-        _log('WebRTC Event: remote stream attached');
+        _tsRemoteStreamAttached = DateTime.now().millisecondsSinceEpoch;
+        _log('WebRTC Event: remote stream attached [ts: $_tsRemoteStreamAttached]');
+        _tsRemotePlaybackStarted = DateTime.now().millisecondsSinceEpoch;
       }
     };
 
     try {
       final Map<String, dynamic> mediaConstraints = {
-        'audio': true,
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
         'video': false,
       };
-      _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      _tsGetUserMediaStarted = DateTime.now().millisecondsSinceEpoch;
+      _log('Calling getUserMedia... [ts: $_tsGetUserMediaStarted]');
+      final stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+
+      if (currentGeneration != _webRTCSetupGeneration) {
+        _log('WebRTC setup cancelled during mic access. Releasing mic immediately.');
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      _localStream = stream;
+      _tsLocalStreamReady = DateTime.now().millisecondsSinceEpoch;
+      _log('Local audio stream obtained. [ts: $_tsLocalStreamReady]');
+
+      try {
+        final audioTracks = _localStream!.getAudioTracks();
+        if (audioTracks.isNotEmpty) {
+          final track = audioTracks.first;
+          final settings = track.getSettings();
+          _log('--- Audio Constraints Diagnostics ---');
+          _log('Requested constraints: ${mediaConstraints['audio']}');
+          _log('Actual getSettings(): $settings');
+          _log('echoCancellation actually enabled: ${settings['echoCancellation']}');
+          _log('noiseSuppression actually enabled: ${settings['noiseSuppression']}');
+          _log('autoGainControl actually enabled: ${settings['autoGainControl']}');
+          _log('-----------------------------------');
+        }
+      } catch (e) {
+        _log('Failed to read audio track settings: $e');
+      }
+
       _localStream!.getAudioTracks().forEach((track) {
         _peerConnection!.addTrack(track, _localStream!);
       });
-      _log('Local mic stream attached to peer connection.');
+      _tsLocalTrackAdded = DateTime.now().millisecondsSinceEpoch;
+      _log('Local mic stream attached to peer connection. [ts: $_tsLocalTrackAdded]');
     } catch (e) {
       _log('Failed to capture mic during WebRTC setup: $e');
     }
@@ -345,7 +565,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     _log('Testing microphone access via getUserMedia...');
     try {
       final Map<String, dynamic> mediaConstraints = {
-        'audio': true,
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
         'video': false,
       };
 
@@ -941,7 +1165,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
 
     _hubConnection!.on('CallAccepted', (args) async {
-      _log('SignalR Event: CallAccepted -> $args');
+      _tsCallAccepted = DateTime.now().millisecondsSinceEpoch;
+      _log('SignalR Event: CallAccepted -> $args [ts: $_tsCallAccepted]');
 
       if (args != null && args.isNotEmpty) {
         _activeCallId = args[0].toString();
@@ -963,13 +1188,18 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       });
       _startCallTimer();
 
-      await _setupWebRTC();
+      await _ensureWebRTCSetup();
       if (_peerConnection != null) {
-        _log('Creating SDP Offer...');
+        _tsOfferCreationStarted = DateTime.now().millisecondsSinceEpoch;
+        _log('Creating SDP Offer... [ts: $_tsOfferCreationStarted]');
         RTCSessionDescription offer = await _peerConnection!.createOffer();
+        _tsOfferCreationCompleted = DateTime.now().millisecondsSinceEpoch;
+        _log('SDP Offer created. [ts: $_tsOfferCreationCompleted]');
         await _peerConnection!.setLocalDescription(offer);
         _log('Sending SDP Offer via SignalR...');
         _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
+        _tsOfferSent = DateTime.now().millisecondsSinceEpoch;
+        _log('SDP Offer sent. [ts: $_tsOfferSent]');
       }
     });
 
@@ -1074,7 +1304,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         final sdp = args[1].toString();
         _log('ReceiveWebRtcOffer: callId=$callId');
 
-        await _setupWebRTC();
+        await _ensureWebRTCSetup();
         _log('ReceiveWebRtcOffer: peer connection exists? ${_peerConnection != null}');
         if (_peerConnection != null) {
           _log('Setting Remote Description (Offer)...');
@@ -1093,7 +1323,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     });
 
     _hubConnection!.on('ReceiveWebRtcAnswer', (args) async {
-      _log('SignalR Event: ReceiveWebRtcAnswer -> $args');
+      _tsAnswerReceived = DateTime.now().millisecondsSinceEpoch;
+      _log('SignalR Event: ReceiveWebRtcAnswer -> $args [ts: $_tsAnswerReceived]');
       if (args != null && args.length >= 2) {
         final callId = args[0].toString();
         _log('ReceiveWebRtcAnswer: callId=$callId');
@@ -1590,7 +1821,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (_hubConnection == null || _activeCallId == null) return;
 
     _ringTimer?.cancel();
-    _log('Responding to call $_activeCallId: accepted=$accepted');
+    if (accepted) {
+      _tsCallAccepted = DateTime.now().millisecondsSinceEpoch;
+    }
+    _log('Responding to call $_activeCallId: accepted=$accepted [ts: $_tsCallAccepted]');
     try {
       await _hubConnection!.invoke('RespondToCall', args: <Object>[_activeCallId!, accepted]);
       if (accepted) {
@@ -1601,6 +1835,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           _callTimerSeconds = 0;
         });
         _startCallTimer();
+
+        _log('Accept sent. Pre-initializing WebRTC immediately.');
+        _ensureWebRTCSetup();
       } else {
         setState(() {
           _isIncomingCall = false;
@@ -1614,13 +1851,37 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   Future<void> _teardownWebRTC() async {
+    _printCallSummary();
+    _statsTimer?.cancel();
+    _statsTimer = null;
     _log('Tearing down WebRTC...');
+
+    _webRTCSetupGeneration++; // Invalidate any pending setup
+    _webRTCSetupFuture = null; // Clear future so subsequent calls start fresh
+
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
     await _peerConnection?.close();
     _peerConnection = null;
     _remoteRenderer?.srcObject = null;
     _pendingIceCandidates.clear();
+
+    _tsCallAccepted = null;
+    _tsWebRTCSetupStarted = null;
+    _tsGetUserMediaStarted = null;
+    _tsLocalStreamReady = null;
+    _tsPeerConnectionCreated = null;
+    _tsLocalTrackAdded = null;
+    _tsOfferCreationStarted = null;
+    _tsOfferCreationCompleted = null;
+    _tsOfferSent = null;
+    _tsAnswerReceived = null;
+    _tsIceGatheringStarted = null;
+    _tsIceGatheringCompleted = null;
+    _tsIceConnected = null;
+    _tsRemoteTrackReceived = null;
+    _tsRemoteStreamAttached = null;
+    _tsRemotePlaybackStarted = null;
   }
 
   Future<void> _endCall() async {
@@ -3565,9 +3826,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Console Audit Trail:', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              TextButton(
-                onPressed: () => setState(() => _consoleLogs.clear()),
-                child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _downloadLogs,
+                    child: const Text('Download Logs', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 11)),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _consoleLogs.clear()),
+                    child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                  ),
+                ],
               ),
             ],
           ),

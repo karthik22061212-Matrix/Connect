@@ -27,7 +27,7 @@ public static class DependencyInjection
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            connectionString = "Server=(localdb)\\mssqllocaldb;Database=ConnectDb;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True";
+            throw new InvalidOperationException("Database connection string 'DefaultConnection' not found.");
         }
 
         services.AddDbContext<ApplicationDbContext>(options =>
@@ -59,6 +59,12 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.AddOptions<Connect.Infrastructure.Configuration.TurnSettings>()
+            .Bind(configuration.GetSection(Connect.Infrastructure.Configuration.TurnSettings.SectionName))
+            .ValidateOnStart();
+
+        services.AddScoped<ITurnCredentialService, TurnCredentialService>();
 
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<IOptions<JwtSettings>>((options, jwtSettingsOptions) =>
