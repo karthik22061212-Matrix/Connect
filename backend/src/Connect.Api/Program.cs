@@ -9,12 +9,19 @@ using Serilog;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configure Serilog logging to console
-builder.Host.UseSerilog((context, services, configuration) => configuration
-    .ReadFrom.Configuration(context.Configuration)
-    .ReadFrom.Services(services)
-    .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .WriteTo.File("logs/connect-.log", rollingInterval: RollingInterval.Day));
+builder.Host.UseSerilog((context, services, configuration) => 
+{
+    configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext()
+        .WriteTo.Console();
+
+    if (context.HostingEnvironment.IsDevelopment())
+    {
+        configuration.WriteTo.File("logs/connect-.log", rollingInterval: RollingInterval.Day);
+    }
+});
 
 // 2. Add services to the container
 builder.Services.AddApplication();
@@ -89,6 +96,29 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Extract and mask access_token from query string to prevent it from being logged
+app.Use(async (context, next) =>
+{
+    var qs = context.Request.QueryString.Value;
+    if (!string.IsNullOrEmpty(qs) && qs.Contains("access_token="))
+    {
+        var token = context.Request.Query["access_token"].ToString();
+        if (!string.IsNullOrEmpty(token))
+        {
+            if (string.IsNullOrEmpty(context.Request.Headers.Authorization))
+            {
+                context.Request.Headers.Authorization = $"Bearer {token}";
+            }
+            
+            // Mask the query string for the rest of the pipeline
+            context.Request.QueryString = new QueryString(
+                System.Text.RegularExpressions.Regex.Replace(qs, @"(?<=access_token=)[^&]+", "***")
+            );
+        }
+    }
+    await next();
+});
 
 // 3. Configure HTTP request pipeline (Strict Middleware Pipeline Order)
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
