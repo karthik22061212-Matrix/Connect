@@ -21,9 +21,17 @@ sudo apt-get install -y coturn
 echo "=== Enabling coturn daemon ==="
 sudo sed -i 's/TURNSERVER_ENABLED=0/TURNSERVER_ENABLED=1/' /etc/default/coturn
 
-# Get public IP address of VM
+# Get IP addresses of VM
 PUBLIC_IP=$(curl -s ifconfig.me)
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
+
+if [ -z "$PUBLIC_IP" ] || [ -z "$PRIVATE_IP" ]; then
+    echo "Error: Could not detect both PUBLIC_IP and PRIVATE_IP."
+    exit 1
+fi
+
 echo "Detected Public IP: $PUBLIC_IP"
+echo "Detected Private IP: $PRIVATE_IP"
 
 echo "=== Setting up TURN Secret ==="
 sudo bash -c "echo 'static-auth-secret=$TURN_SECRET' > /etc/turnserver_secret.conf"
@@ -37,10 +45,10 @@ echo "=== Writing /etc/turnserver.conf ==="
 sudo cat <<EOF > /etc/turnserver.conf
 # Coturn Configuration for Connect WebRTC
 listening-port=3478
-tls-listening-port=5349
 
 listening-ip=0.0.0.0
-external-ip=$PUBLIC_IP
+relay-ip=$PRIVATE_IP
+external-ip=$PUBLIC_IP/$PRIVATE_IP
 
 realm=$REALM
 
@@ -55,7 +63,7 @@ no-cli
 no-loopback-peers
 no-multicast-peers
 use-auth-secret
-include /etc/turnserver_secret.conf
+static-auth-secret=$TURN_SECRET
 
 # Logging
 log-file=/var/log/turnserver/turnserver.log

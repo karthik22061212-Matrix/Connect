@@ -231,7 +231,7 @@ $FrontendUrlHostname = az staticwebapp show --name $StaticWebAppName --resource-
 $FrontendUrl = "https://$FrontendUrlHostname"
 $FrontendReachable = $false
 try {
-    $null = Invoke-WebRequest -Uri $FrontendUrl -Method Get -TimeoutSec 15
+    $null = Invoke-RestMethod -Uri $FrontendUrl -Method Get -TimeoutSec 15
     $FrontendReachable = $true
     Write-Host "Frontend is reachable at $FrontendUrl" -ForegroundColor Green
 } catch {

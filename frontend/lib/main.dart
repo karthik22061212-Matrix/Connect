@@ -531,9 +531,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     };
 
-    _peerConnection!.onIceCandidateError = (dynamic event) {
-      _log('WebRTC ICE Candidate Error: $event [ts: ${DateTime.now().millisecondsSinceEpoch}]');
-    };
+
 
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
       final now = DateTime.now().millisecondsSinceEpoch;
