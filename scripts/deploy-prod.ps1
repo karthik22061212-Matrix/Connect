@@ -101,8 +101,8 @@ try {
 # ------------------------------------------------------------------------------
 Write-Host "`n[4/15] Backend build..." -ForegroundColor Yellow
 $BackendDir = "$PSScriptRoot\..\backend"
-$dotnetBuildProc = Start-Process -FilePath "dotnet" -ArgumentList "build", "$BackendDir\Connect.slnx", "-c", "Release" -NoNewWindow -Wait -PassThru
-if ($dotnetBuildProc.ExitCode -ne 0) {
+dotnet build "$BackendDir\Connect.slnx" -c Release
+if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Backend build failed." -ForegroundColor Red
     exit 1
 }
@@ -115,8 +115,8 @@ $PublishDir = "$BackendDir\publish"
 if (Test-Path $PublishDir) { Remove-Item -Recurse -Force $PublishDir }
 
 Write-Host "Publishing Connect.Api.csproj (linux-x64)..." -ForegroundColor Gray
-$dotnetPublishProc = Start-Process -FilePath "dotnet" -ArgumentList "publish", "$BackendDir\src\Connect.Api\Connect.Api.csproj", "-c", "Release", "-o", $PublishDir, "-r", "linux-x64", "--self-contained", "false" -NoNewWindow -Wait -PassThru
-if ($dotnetPublishProc.ExitCode -ne 0) {
+dotnet publish "$BackendDir\src\Connect.Api\Connect.Api.csproj" -c Release -o $PublishDir -r linux-x64 --self-contained false
+if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Backend publish failed." -ForegroundColor Red
     exit 1
 }
@@ -192,8 +192,8 @@ Write-Host "`n[10/15] Frontend production build..." -ForegroundColor Yellow
 $FrontendDir = "$PSScriptRoot\..\frontend"
 Push-Location $FrontendDir
 try {
-    $flutterBuildProc = Start-Process -FilePath "flutter" -ArgumentList "build", "web", "--release", "--dart-define=API_BASE_URL=$ApiBaseUrl" -NoNewWindow -Wait -PassThru
-    if ($flutterBuildProc.ExitCode -ne 0) {
+    flutter build web --release --dart-define=API_BASE_URL=$ApiBaseUrl
+    if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Frontend build failed." -ForegroundColor Red
         exit 1
     }
@@ -213,8 +213,8 @@ if ([string]::IsNullOrWhiteSpace($SwaToken)) {
 Push-Location $FrontendDir
 try {
     $env:SWA_CLI_DEPLOYMENT_TOKEN = $SwaToken
-    $npxProc = Start-Process -FilePath "npx.cmd" -ArgumentList "-y", "@azure/static-web-apps-cli", "deploy", "./build/web", "--env", "production" -NoNewWindow -Wait -PassThru
-    if ($npxProc.ExitCode -ne 0) {
+    npx.cmd -y @azure/static-web-apps-cli deploy ./build/web --env production
+    if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: SWA deployment failed." -ForegroundColor Red
         exit 1
     }
@@ -316,5 +316,5 @@ Write-Host "`n### Final Gate"
 if ($HealthPassed -and $DbConnected -and $FrontendReachable -and $TurnVmRunning) {
     Write-Host "READY FOR MANUAL TESTING" -ForegroundColor Green
 } else {
-    Write-Host "NOT READY — Backend or Frontend failed validation." -ForegroundColor Red
+    Write-Host "NOT READY - Backend or Frontend failed validation." -ForegroundColor Red
 }
