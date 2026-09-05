@@ -20,6 +20,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<UserPresenceSetting> UserPresenceSettings => Set<UserPresenceSetting>();
+    public DbSet<PresenceVisibilityException> PresenceVisibilityExceptions => Set<PresenceVisibilityException>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

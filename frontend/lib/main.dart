@@ -145,6 +145,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   UserSession? get currentSession => _currentSession;
 
   int _selectedNavIndex = 0;
+  String? _selectedHistoryContact;
 
   HubConnection? _hubConnection;
   bool _isHubConnected = false;
@@ -2328,7 +2329,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               ),
               const SizedBox(height: 16),
               Text(
-                '@${session.handle}',
+                session.handle,
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
               ),
               const SizedBox(height: 4),
@@ -2372,7 +2373,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     final cHandle = c['contactUserId'] ?? c['userId'] ?? cId;
                     return DropdownMenuItem<String>(
                       value: cId,
-                      child: Text('@$cHandle'),
+                      child: Text(cHandle),
                     );
                   }).toList(),
                   onChanged: (val) {
@@ -2474,7 +2475,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '@${session.handle}',
+                      session.handle,
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     Row(
@@ -2526,7 +2527,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               if (isWide)
                 NavigationRail(
                   selectedIndex: _selectedNavIndex,
-                  onDestinationSelected: (idx) => setState(() => _selectedNavIndex = idx),
+                  onDestinationSelected: (idx) => setState(() {
+                    _selectedNavIndex = idx;
+                    _selectedHistoryContact = null;
+                  }),
                   labelType: NavigationRailLabelType.all,
                   selectedIconTheme: const IconThemeData(color: Color(0xFF0D9488)),
                   selectedLabelTextStyle: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
@@ -2602,7 +2606,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ? null
           : NavigationBar(
               selectedIndex: _selectedNavIndex,
-              onDestinationSelected: (idx) => setState(() => _selectedNavIndex = idx),
+              onDestinationSelected: (idx) => setState(() {
+                _selectedNavIndex = idx;
+                _selectedHistoryContact = null;
+              }),
               indicatorColor: const Color(0xFFCCFBF1),
               destinations: [
                 const NavigationDestination(
@@ -3000,7 +3007,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                              Text(handle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                               Text('Phone: $phone', style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
                             ],
                           ),
@@ -3171,7 +3178,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                         ),
                       ],
                     ),
-                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: Text(
                       'Status: $presence',
                       style: TextStyle(color: isOnline ? const Color(0xFF059669) : const Color(0xFF64748B), fontSize: 12),
@@ -3262,7 +3269,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('@$senderHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      Text(senderHandle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                                       const SizedBox(height: 2),
                                       Text('Wants to connect with you', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
                                     ],
@@ -3345,7 +3352,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('@$targetHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      Text(targetHandle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                                       const SizedBox(height: 2),
                                       const Text('Request sent', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
                                     ],
@@ -3425,12 +3432,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                       foregroundColor: const Color(0xFF0D9488),
                       child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'U'),
                     ),
-                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: const Text('Voice Call via SignalR', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                     trailing: ElevatedButton.icon(
                       onPressed: () => _initiateCall(targetGuidId, handle),
                       icon: const Icon(Icons.phone, size: 18),
-                      label: const Text('Initiate Call'),
+                      label: const Text('Call'),
                     ),
                   ),
                 );
@@ -3533,7 +3540,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 24),
           Text(
-            '@${_callerOrCalleeName ?? "Unknown"}',
+            _callerOrCalleeName ?? "Unknown",
             style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 8),
@@ -3650,7 +3657,137 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     );
   }
 
+  String _formatCallDateTime(String isoString) {
+    if (isoString.isEmpty) return '';
+    try {
+      final DateTime dt = DateTime.parse(isoString).toLocal();
+      final List<String> months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final month = months[dt.month - 1];
+      final day = dt.day;
+      final year = dt.year;
+      
+      int hour = dt.hour;
+      final minute = dt.minute.toString().padLeft(2, '0');
+      final ampm = hour >= 12 ? 'PM' : 'AM';
+      if (hour == 0) {
+        hour = 12;
+      } else if (hour > 12) {
+        hour -= 12;
+      }
+      
+      return '$month $day, $year · $hour:$minute $ampm';
+    } catch (e) {
+      return isoString;
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '0s';
+    if (seconds < 60) return '${seconds}s';
+    
+    final int hours = seconds ~/ 3600;
+    final int remainingSeconds = seconds % 3600;
+    final int minutes = remainingSeconds ~/ 60;
+    
+    if (hours > 0) {
+      if (minutes > 0) {
+        return '${hours}h ${minutes}m';
+      }
+      return '${hours}h';
+    }
+    
+    return '${minutes}m';
+  }
+
   Widget _buildCallHistoryScreen() {
+    if (_selectedHistoryContact != null) {
+      final top20 = _callHistory.take(20).toList();
+      final contactCalls = top20.where((item) {
+        final isOutgoing = item['isOutgoing'] ?? false;
+        final callerUserId = item['callerUserId'] ?? 'Unknown';
+        final calleeUserId = item['calleeUserId'] ?? 'Unknown';
+        final otherPerson = isOutgoing ? calleeUserId : callerUserId;
+        return otherPerson == _selectedHistoryContact;
+      }).toList();
+
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => setState(() => _selectedHistoryContact = null),
+                ),
+                const SizedBox(width: 8),
+                Text(_selectedHistoryContact!, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: ListView.separated(
+                itemCount: contactCalls.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final item = contactCalls[index];
+                  final status = item['status'] ?? 'Unknown';
+                  final startedAtRaw = item['startedAt'] ?? '';
+                  final startedAtFormatted = _formatCallDateTime(startedAtRaw);
+                  final bool isAccepted = status == 'Completed'; // Backend uses Completed for answered calls
+                  final int duration = item['durationSeconds'] ?? 0;
+                  
+                  String subtitleText = startedAtFormatted;
+                  if (isAccepted && duration > 0) {
+                      subtitleText += '\nDuration: ${_formatDuration(duration)}';
+                  }
+
+                  String displayStatus = 'Unknown';
+                  if (status == 'Completed') {
+                    displayStatus = 'Accepted';
+                  } else if (status == 'Rejected') {
+                    displayStatus = 'Rejected';
+                  } else if (status == 'Missed') {
+                    displayStatus = 'Missed';
+                  } else if (status == 'Failed') {
+                    displayStatus = 'Failed';
+                  }
+
+                  return Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isAccepted ? const Color(0xFFECFDF5) : const Color(0xFFFFF1F2),
+                        foregroundColor: isAccepted ? const Color(0xFF059669) : const Color(0xFFE11D48),
+                        child: Icon(
+                          isAccepted ? Icons.phone : Icons.call_missed,
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(displayStatus, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(subtitleText, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final top20 = _callHistory.take(20).toList();
+    final List<String> orderedContacts = [];
+    for (final item in top20) {
+      final isOutgoing = item['isOutgoing'] ?? false;
+      final callerUserId = item['callerUserId'] ?? 'Unknown';
+      final calleeUserId = item['calleeUserId'] ?? 'Unknown';
+      final otherPerson = isOutgoing ? calleeUserId : callerUserId;
+      if (!orderedContacts.contains(otherPerson)) {
+        orderedContacts.add(otherPerson);
+      }
+    }
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -3666,7 +3803,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 20),
           Expanded(
-            child: _callHistory.isEmpty
+            child: orderedContacts.isEmpty
                 ? Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(40),
@@ -3687,46 +3824,20 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     ),
                   )
                 : ListView.separated(
-                    itemCount: _callHistory.length,
+                    itemCount: orderedContacts.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final item = _callHistory[index];
-                      final isOutgoing = item['isOutgoing'] ?? false;
-                      final callerUserId = item['callerUserId'] ?? 'Unknown';
-                      final calleeUserId = item['calleeUserId'] ?? 'Unknown';
-                      final status = item['status'] ?? 'Unknown';
-                      final reason = item['missedReason'];
-                      final duration = item['durationSeconds'] ?? 0;
-                      final startedAt = item['startedAt'] ?? '';
-
-                      final otherPerson = isOutgoing ? calleeUserId : callerUserId;
-                      final bool isAccepted = status == 'Accepted';
-
+                      final contact = orderedContacts[index];
                       return Card(
                         child: ListTile(
+                          onTap: () => setState(() => _selectedHistoryContact = contact),
                           leading: CircleAvatar(
-                            backgroundColor: isAccepted
-                                ? (isOutgoing ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF))
-                                : const Color(0xFFFFF1F2),
-                            foregroundColor: isAccepted
-                                ? (isOutgoing ? const Color(0xFF059669) : const Color(0xFF2563EB))
-                                : const Color(0xFFE11D48),
-                            child: Icon(
-                              isAccepted
-                                  ? (isOutgoing ? Icons.call_made : Icons.call_received)
-                                  : Icons.call_missed,
-                              size: 20,
-                            ),
+                            backgroundColor: const Color(0xFFF0FDFA),
+                            foregroundColor: const Color(0xFF0D9488),
+                            child: Text(contact.isNotEmpty ? contact[0].toUpperCase() : 'U'),
                           ),
-                          title: Text('@$otherPerson', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(
-                            '${isOutgoing ? "Outgoing" : "Incoming"} • Status: $status ${reason != null ? "($reason)" : ""}\nTime: $startedAt',
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                          ),
-                          trailing: Text(
-                            '${duration}s',
-                            style: const TextStyle(fontFamily: 'monospace', color: Color(0xFF475569)),
-                          ),
+                          title: Text(contact, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
                         ),
                       );
                     },
@@ -3799,7 +3910,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                               foregroundColor: const Color(0xFFE11D48),
                               child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'B'),
                             ),
-                            title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                             trailing: OutlinedButton(
                               onPressed: () => _unblockUser(id),
                               child: const Text('Unblock'),
@@ -3839,8 +3950,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Text('User Handle: ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-                      Text('@${session?.handle ?? "Unknown"}', style: const TextStyle(color: Color(0xFF0F172A))),
+                      const Text('User ID: ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                      Text(session?.handle ?? "Unknown", style: const TextStyle(color: Color(0xFF0F172A))),
                     ],
                   ),
                   const SizedBox(height: 6),
