@@ -10,15 +10,18 @@ public class GetPresenceQueryHandler : IRequestHandler<GetPresenceQuery, Presenc
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPresenceTracker _presenceTracker;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IPresenceVisibilityService _presenceVisibilityService;
 
     public GetPresenceQueryHandler(
         IUnitOfWork unitOfWork,
         IPresenceTracker presenceTracker,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IPresenceVisibilityService presenceVisibilityService)
     {
         _unitOfWork = unitOfWork;
         _presenceTracker = presenceTracker;
         _currentUserService = currentUserService;
+        _presenceVisibilityService = presenceVisibilityService;
     }
 
     public async Task<PresenceDto> Handle(GetPresenceQuery request, CancellationToken cancellationToken)
@@ -34,15 +37,10 @@ public class GetPresenceQueryHandler : IRequestHandler<GetPresenceQuery, Presenc
 
         if (currentUserId != request.TargetUserId)
         {
-            var minId = currentUserId.CompareTo(request.TargetUserId) < 0 ? currentUserId : request.TargetUserId;
-            var maxId = currentUserId.CompareTo(request.TargetUserId) < 0 ? request.TargetUserId : currentUserId;
-
-            var connections = await _unitOfWork.Connections.ListAsync(cancellationToken);
-            var isConnected = connections.Any(c => c.UserAId == minId && c.UserBId == maxId);
-
-            if (!isConnected)
+            var canView = await _presenceVisibilityService.CanViewPresenceAsync(request.TargetUserId, currentUserId, cancellationToken);
+            if (!canView)
             {
-                throw new ForbiddenAccessException("You can only view presence status for connected users.");
+                throw new ForbiddenAccessException("You are not authorized to view this user's presence.");
             }
         }
 

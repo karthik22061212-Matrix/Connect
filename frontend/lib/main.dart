@@ -324,6 +324,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   List<dynamic> _sentRequests = [];
   List<dynamic> _connections = [];
   List<dynamic> _blockedUsers = [];
+  int _presenceVisibility = 1;
+  List<dynamic> _presenceExceptions = [];
+  String _myPresenceStatus = 'Offline';
+  String _intendedPresenceStatus = 'Online';
   List<dynamic> _callHistory = [];
 
   final FocusNode _loginEmailFocusNode = FocusNode();
@@ -1291,12 +1295,45 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           _isIncomingCall = false;
           _isActiveCall = false;
           _activeCallId = null;
+          _myPresenceStatus = 'Offline';
+        });
+      }
+    });
+
+    _hubConnection!.onreconnecting(({error}) {
+      _log('SignalR Reconnecting -> $error');
+      if (mounted) {
+        setState(() {
+          _isHubConnected = false;
+          _myPresenceStatus = 'Offline';
+        });
+      }
+    });
+
+    _hubConnection!.onreconnected(({connectionId}) {
+      _log('SignalR Reconnected -> $connectionId');
+      _updateMyPresence(_intendedPresenceStatus);
+      if (mounted) {
+        setState(() {
+          _isHubConnected = true;
+          _myPresenceStatus = _intendedPresenceStatus;
         });
       }
     });
 
     _hubConnection!.on('UserPresenceChanged', (args) {
       _log('SignalR Event: UserPresenceChanged -> $args');
+      if (args != null && args.length >= 2) {
+        final userId = args[0] as String;
+        final status = args[1]?.toString() ?? '';
+        if (userId == currentSession?.id) {
+          if (mounted) {
+            setState(() {
+              _myPresenceStatus = status;
+            });
+          }
+        }
+      }
       _fetchConnections();
     });
 
@@ -1533,6 +1570,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       await _hubConnection!.start();
       setState(() {
         _isHubConnected = true;
+        _myPresenceStatus = 'Online';
       });
       _log('SignalR Connected as User (${session.handle})');
     } catch (e) {
@@ -1560,6 +1598,25 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         }
       }
     });
+  }
+
+  Future<void> _updateMyPresence(String statusName) async {
+    _intendedPresenceStatus = statusName;
+    if (_hubConnection == null) return;
+    try {
+      int statusIndex = 0;
+      if (statusName.toLowerCase() == 'online') statusIndex = 1;
+      else if (statusName.toLowerCase() == 'busy') statusIndex = 2;
+      
+      await _hubConnection!.invoke('UpdatePresence', args: [statusIndex]);
+      if (mounted) {
+        setState(() {
+          _myPresenceStatus = statusName;
+        });
+      }
+    } catch (e) {
+      _log('Error updating presence: $e');
+    }
   }
 
   void _startCallTimer() {
@@ -1906,6 +1963,140 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     } catch (e) {
       _log('Decline Request Exception: $e');
     }
+  }
+
+  Future<void> _fetchPresenceSettings() async {
+    final res = await _authenticatedApiCall((token) => http.get(
+      Uri.parse('$_baseUrl/api/v1/presence/settings'),
+      headers: {'Authorization': 'Bearer $token'},
+    ));
+    if (res != null && res.statusCode == 200) {
+      final body = jsonDecode(res.body);
+      if (mounted) {
+        setState(() {
+          _presenceVisibility = body['visibility'] ?? 1;
+        });
+      }
+    }
+  }
+
+  Future<void> _updatePresenceVisibility(int visibility) async {
+    final res = await _authenticatedApiCall((token) => http.put(
+      Uri.parse('$_baseUrl/api/v1/presence/settings'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'visibility': visibility}),
+    ));
+    if (res != null && (res.statusCode == 200 || res.statusCode == 204)) {
+      if (mounted) {
+        setState(() {
+          _presenceVisibility = visibility;
+        });
+      }
+    }
+  }
+
+  Future<void> _fetchPresenceExceptions() async {
+    final res = await _authenticatedApiCall((token) => http.get(
+      Uri.parse('$_baseUrl/api/v1/presence/settings/exceptions'),
+      headers: {'Authorization': 'Bearer $token'},
+    ));
+    if (res != null && res.statusCode == 200) {
+      if (mounted) {
+        setState(() {
+          _presenceExceptions = jsonDecode(res.body);
+        });
+      }
+    }
+  }
+
+  Future<void> _setPresenceException(String targetId, bool isAllowed) async {
+    final res = await _authenticatedApiCall((token) => http.post(
+      Uri.parse('$_baseUrl/api/v1/presence/settings/exceptions'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'targetUserId': targetId, 'isAllowed': isAllowed}),
+    ));
+    if (res != null && (res.statusCode == 200 || res.statusCode == 204)) {
+      await _fetchPresenceExceptions();
+    }
+  }
+
+  Future<void> _deletePresenceException(String targetId) async {
+    final res = await _authenticatedApiCall((token) => http.delete(
+      Uri.parse('$_baseUrl/api/v1/presence/settings/exceptions/$targetId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ));
+    if (res != null && (res.statusCode == 200 || res.statusCode == 204)) {
+      await _fetchPresenceExceptions();
+    }
+  }
+
+  void _showPresenceExceptionsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Custom Presence Visibility', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Manage which connections can or cannot see your presence.', style: TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+                  const SizedBox(height: 16),
+                  if (_connections.isEmpty)
+                    const Text('No connections to manage.', style: TextStyle(fontSize: 13))
+                  else
+                    Expanded(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _connections.length,
+                        itemBuilder: (context, index) {
+                          final c = _connections[index];
+                          final cId = c['contactId'] ?? c['connectedUserId'];
+                          final cHandle = c['contactUserId'] ?? c['userId'] ?? 'Contact';
+                          final existingException = _presenceExceptions.firstWhere((e) => e['targetUserId'] == cId, orElse: () => null);
+                          
+                          String currentStatus = 'Default';
+                          if (existingException != null) {
+                            currentStatus = existingException['isAllowed'] == true ? 'Allowed' : 'Denied';
+                          }
+
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(cHandle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            subtitle: Text('Status: $currentStatus', style: const TextStyle(fontSize: 12)),
+                            trailing: PopupMenuButton<String>(
+                              onSelected: (val) async {
+                                if (val == 'allow') {
+                                  await _setPresenceException(cId, true);
+                                } else if (val == 'deny') {
+                                  await _setPresenceException(cId, false);
+                                } else {
+                                  await _deletePresenceException(cId);
+                                }
+                                setDialogState(() {});
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(value: 'default', child: Text('Default')),
+                                const PopupMenuItem(value: 'allow', child: Text('Allow')),
+                                const PopupMenuItem(value: 'deny', child: Text('Deny')),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Done')),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _fetchConnections() async {
@@ -2309,45 +2500,93 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     final session = currentSession;
     if (session == null) return;
 
+    _fetchPresenceSettings();
+    _fetchPresenceExceptions();
+
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Container(
-          width: 360,
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircleAvatar(
-                radius: 44,
-                backgroundColor: const Color(0xFF0D9488),
-                child: Text(
-                  session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
-                  style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: Container(
+              width: 360,
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: CircleAvatar(
+                      radius: 44,
+                      backgroundColor: const Color(0xFF0D9488),
+                      child: Text(
+                        session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                        style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      session.handle,
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      session.email.isNotEmpty ? session.email : 'No email address',
+                      style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  const Text('Privacy Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  const Text('Show my presence to:', style: TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    value: _presenceVisibility,
+                    decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text('Everyone')),
+                      DropdownMenuItem(value: 1, child: Text('My connections')),
+                      DropdownMenuItem(value: 2, child: Text('Nobody')),
+                      DropdownMenuItem(value: 3, child: Text('Custom')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          _presenceVisibility = val;
+                        });
+                        _updatePresenceVisibility(val);
+                      }
+                    },
+                  ),
+                  if (_presenceVisibility == 3) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                        onPressed: _showPresenceExceptionsDialog,
+                        child: const Text('Manage Exceptions'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                session.handle,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                session.email.isNotEmpty ? session.email : 'No email address',
-                style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        }
       ),
     );
   }
@@ -2456,18 +2695,35 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF0D9488),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
+                Stack(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0D9488),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: (_myPresenceStatus.toLowerCase() == 'online' || _myPresenceStatus.toLowerCase() == 'busy') ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(width: 12),
                 Column(
@@ -2477,23 +2733,6 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     Text(
                       session.handle,
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _isHubConnected ? 'Connected' : 'Offline',
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                        ),
-                      ],
                     ),
                   ],
                 ),
@@ -3150,8 +3389,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 final conn = _connections[index];
                 final targetGuidId = conn['contactId'] ?? conn['connectedUserId'];
                 final handle = conn['contactUserId'] ?? conn['userId'] ?? 'Contact';
-                final presence = conn['presenceStatus'] ?? 'Offline';
-                final isOnline = presence.toString().toLowerCase() == 'online';
+                final presence = conn['presenceStatus'];
+                final isOnline = presence?.toString().toLowerCase() == 'online';
 
                 return Card(
                   child: ListTile(
@@ -3163,26 +3402,23 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                           foregroundColor: const Color(0xFF334155),
                           child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'C'),
                         ),
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: isOnline ? const Color(0xFF10B981) : const Color(0xFFCBD5E1),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
+                        if (presence != null)
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                     title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(
-                      'Status: $presence',
-                      style: TextStyle(color: isOnline ? const Color(0xFF059669) : const Color(0xFF64748B), fontSize: 12),
-                    ),
                     trailing: ElevatedButton.icon(
                       onPressed: () => _initiateCall(targetGuidId, handle),
                       icon: const Icon(Icons.phone, size: 16),

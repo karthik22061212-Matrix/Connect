@@ -26,6 +26,7 @@ public class CallHub : Hub<ICallHubClient>
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<CallHub> _logger;
     private readonly Connect.Application.Common.Diagnostics.IDiagnosticLogService _diagnosticLogService;
+    private readonly IPresenceVisibilityService _presenceVisibilityService;
 
     public CallHub(
         IPresenceTracker presenceTracker,
@@ -34,7 +35,8 @@ public class CallHub : Hub<ICallHubClient>
         ISender mediator,
         IServiceScopeFactory serviceScopeFactory,
         ILogger<CallHub> logger,
-        Connect.Application.Common.Diagnostics.IDiagnosticLogService diagnosticLogService)
+        Connect.Application.Common.Diagnostics.IDiagnosticLogService diagnosticLogService,
+        IPresenceVisibilityService presenceVisibilityService)
     {
         _presenceTracker = presenceTracker;
         _unitOfWork = unitOfWork;
@@ -43,6 +45,7 @@ public class CallHub : Hub<ICallHubClient>
         _serviceScopeFactory = serviceScopeFactory;
         _logger = logger;
         _diagnosticLogService = diagnosticLogService;
+        _presenceVisibilityService = presenceVisibilityService;
     }
 
     public override async Task OnConnectedAsync()
@@ -73,7 +76,7 @@ public class CallHub : Hub<ICallHubClient>
                 await _unitOfWork.SaveChangesAsync(CancellationToken.None);
             }
 
-            await Clients.Others.UserPresenceChanged(userId, PresenceStatus.Online);
+            await BroadcastPresenceAsync(userId, PresenceStatus.Online);
         }
 
         await base.OnConnectedAsync();
@@ -107,7 +110,7 @@ public class CallHub : Hub<ICallHubClient>
                 await _unitOfWork.SaveChangesAsync(CancellationToken.None);
             }
 
-            await Clients.Others.UserPresenceChanged(userId, PresenceStatus.Offline);
+            await BroadcastPresenceAsync(userId, PresenceStatus.Offline);
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -126,7 +129,7 @@ public class CallHub : Hub<ICallHubClient>
             await _unitOfWork.SaveChangesAsync(CancellationToken.None);
         }
 
-        await Clients.Others.UserPresenceChanged(userId, status);
+        await BroadcastPresenceAsync(userId, status);
     }
 
     public async Task InitiateCallAttempt(Guid calleeId)
@@ -407,5 +410,23 @@ public class CallHub : Hub<ICallHubClient>
         }
 
         throw new HubException("Unauthorized: User ID not found.");
+    }
+
+    private async Task BroadcastPresenceAsync(Guid userId, PresenceStatus status)
+    {
+        var potentialViewers = await _presenceTracker.GetOnlineUsersAsync();
+        var authorizedViewers = await _presenceVisibilityService.GetAuthorizedViewersAsync(userId, potentialViewers, CancellationToken.None);
+
+        var connectionIds = new List<string>();
+        foreach (var viewerId in authorizedViewers)
+        {
+            var connections = await _presenceTracker.GetConnectionIdsForUserAsync(viewerId);
+            connectionIds.AddRange(connections);
+        }
+
+        if (connectionIds.Count > 0)
+        {
+            await Clients.Clients(connectionIds).UserPresenceChanged(userId, status);
+        }
     }
 }

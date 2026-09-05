@@ -8,6 +8,6 @@ public record ConnectionDto(
     string ContactUserId,
     string ContactEmail,
     string? ContactPhoneNumber,
-    PresenceStatus PresenceStatus,
+    PresenceStatus? PresenceStatus,
     DateTime ConnectedAt
 );

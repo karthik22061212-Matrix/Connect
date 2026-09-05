@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IPushNotificationService, Notifications.FcmPushNotificationService>();
         services.AddScoped<ICallTimeoutProcessor, CallTimeoutProcessor>();
+        services.AddScoped<IPresenceVisibilityService, PresenceVisibilityService>();
 
         services.AddHostedService<CallHistoryPurgeBackgroundService>();
         services.AddHostedService<ExpiredAccountsPurgeBackgroundService>();
