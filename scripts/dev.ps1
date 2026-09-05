@@ -27,6 +27,36 @@ if (-not (Test-Path $DevConfig)) {
     }
 }
 
+# ------------------------------------------------------------------------------
+# Database Migrations Validation
+# ------------------------------------------------------------------------------
+Write-Host "`nChecking for pending EF Core migrations..." -ForegroundColor Cyan
+$infrastructureDir = "$PSScriptRoot\..\backend\src\Connect.Infrastructure"
+$apiDir = "$PSScriptRoot\..\backend\src\Connect.Api"
+
+$migrations = dotnet ef migrations list --project $infrastructureDir --startup-project $apiDir 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Failed to list migrations. Ensure database is accessible." -ForegroundColor Red
+    $migrations | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    exit 1
+}
+
+$pendingMigrations = $migrations | Where-Object { $_ -match "\(Pending\)" }
+if ($pendingMigrations) {
+    Write-Host "Found pending migrations:" -ForegroundColor Yellow
+    $pendingMigrations | ForEach-Object { Write-Host " - $_" -ForegroundColor Yellow }
+    Write-Host "Applying migrations..." -ForegroundColor Cyan
+    
+    dotnet ef database update --project $infrastructureDir --startup-project $apiDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Database migration failed. Cannot start backend against a stale schema." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Migrations applied successfully." -ForegroundColor Green
+} else {
+    Write-Host "Database is up to date." -ForegroundColor Green
+}
+
 # Start Backend
 Write-Host "`nStarting Backend on localhost:5234..." -ForegroundColor Cyan
 Start-Process -NoNewWindow -FilePath "dotnet" -ArgumentList "run", "--project", $BackendDir, "--urls", "http://localhost:5234"

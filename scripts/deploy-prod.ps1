@@ -130,9 +130,39 @@ if (Test-Path $PublishZip) { Remove-Item -Force $PublishZip }
 Compress-Archive -Path "$PublishDir\*" -DestinationPath $PublishZip -Force
 
 # ------------------------------------------------------------------------------
-# 7. Backend deployment
+# 7. Database schema migration
 # ------------------------------------------------------------------------------
-Write-Host "`n[7/15] Backend deployment..." -ForegroundColor Yellow
+Write-Host "`n[7/16] Database schema migration..." -ForegroundColor Yellow
+$ProdConnectionString = az webapp config connection-string list --name $ApiAppName --resource-group $ResourceGroupName --query "[?name=='DefaultConnection'].value | [0]" -o tsv
+if ([string]::IsNullOrWhiteSpace($ProdConnectionString)) {
+    # Fallback to the first connection string if DefaultConnection isn't found
+    $ProdConnectionString = az webapp config connection-string list --name $ApiAppName --resource-group $ResourceGroupName --query "[0].value" -o tsv
+}
+
+if ([string]::IsNullOrWhiteSpace($ProdConnectionString)) {
+    Write-Host "ERROR: Could not retrieve production connection string from App Service." -ForegroundColor Red
+    exit 1
+}
+
+$migrationOutput = dotnet ef database update --project "$BackendDir\src\Connect.Infrastructure" --startup-project "$BackendDir\src\Connect.Api" --connection "$ProdConnectionString" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Database migration failed." -ForegroundColor Red
+    $migrationOutput | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    exit 1
+}
+
+$appliedMigrations = $migrationOutput | Where-Object { $_ -match "^Applying migration" }
+if ($appliedMigrations) {
+    $DbMigrationStatus = ($appliedMigrations -replace "Applying migration ", "" -replace "'", "") -join ", "
+} else {
+    $DbMigrationStatus = "No migrations pending"
+}
+Write-Host "Migration status: $DbMigrationStatus" -ForegroundColor Green
+
+# ------------------------------------------------------------------------------
+# 8. Backend deployment
+# ------------------------------------------------------------------------------
+Write-Host "`n[8/16] Backend deployment..." -ForegroundColor Yellow
 try {
     $null = az webapp deploy --resource-group $ResourceGroupName --name $ApiAppName --src-path $PublishZip --type zip
 } catch {
@@ -141,9 +171,9 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 8. Backend startup/wait
+# 9. Backend startup/wait
 # ------------------------------------------------------------------------------
-Write-Host "`n[8/15] Backend startup/wait..." -ForegroundColor Yellow
+Write-Host "`n[9/16] Backend startup/wait..." -ForegroundColor Yellow
 try {
     az webapp start --name $ApiAppName --resource-group $ResourceGroupName -o none
 } catch {
@@ -152,9 +182,9 @@ try {
 Start-Sleep -Seconds 10
 
 # ------------------------------------------------------------------------------
-# 9. Backend health verification
+# 10. Backend health verification
 # ------------------------------------------------------------------------------
-Write-Host "`n[9/15] Backend health verification..." -ForegroundColor Yellow
+Write-Host "`n[10/16] Backend health verification..." -ForegroundColor Yellow
 $HealthUrl = "$ApiBaseUrl/api/v1/health"
 $HealthPassed = $false
 $HealthMessage = "Health check failed."
@@ -186,9 +216,9 @@ if (-not $HealthPassed) {
 }
 
 # ------------------------------------------------------------------------------
-# 10. Frontend production build
+# 11. Frontend production build
 # ------------------------------------------------------------------------------
-Write-Host "`n[10/15] Frontend production build..." -ForegroundColor Yellow
+Write-Host "`n[11/16] Frontend production build..." -ForegroundColor Yellow
 $FrontendDir = "$PSScriptRoot\..\frontend"
 Push-Location $FrontendDir
 try {
@@ -202,9 +232,9 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 11. Static Web App deployment
+# 12. Static Web App deployment
 # ------------------------------------------------------------------------------
-Write-Host "`n[11/15] Static Web App deployment..." -ForegroundColor Yellow
+Write-Host "`n[12/16] Static Web App deployment..." -ForegroundColor Yellow
 $SwaToken = az staticwebapp secrets list --name $StaticWebAppName --resource-group $ResourceGroupName --query "properties.apiKey" -o tsv
 if ([string]::IsNullOrWhiteSpace($SwaToken)) {
     Write-Host "ERROR: Failed to retrieve SWA token." -ForegroundColor Red
@@ -224,9 +254,9 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 12. Frontend reachability verification
+# 13. Frontend reachability verification
 # ------------------------------------------------------------------------------
-Write-Host "`n[12/15] Frontend reachability verification..." -ForegroundColor Yellow
+Write-Host "`n[13/16] Frontend reachability verification..." -ForegroundColor Yellow
 $FrontendUrlHostname = az staticwebapp show --name $StaticWebAppName --resource-group $ResourceGroupName --query "defaultHostname" -o tsv
 $FrontendUrl = "https://$FrontendUrlHostname"
 $FrontendReachable = $false
@@ -239,9 +269,9 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 13. TURN VM/service verification
+# 14. TURN VM/service verification
 # ------------------------------------------------------------------------------
-Write-Host "`n[13/15] TURN VM/service verification..." -ForegroundColor Yellow
+Write-Host "`n[14/16] TURN VM/service verification..." -ForegroundColor Yellow
 $VmState = az vm show --name $TurnVmName --resource-group $ResourceGroupName --show-details --query "powerState" -o tsv
 $TurnVmRunning = ($VmState -eq "VM running")
 if ($TurnVmRunning) {
@@ -251,9 +281,9 @@ if ($TurnVmRunning) {
 }
 
 # ------------------------------------------------------------------------------
-# 14. Azure SQL connectivity verification
+# 15. Azure SQL connectivity verification
 # ------------------------------------------------------------------------------
-Write-Host "`n[14/15] Azure SQL connectivity verification..." -ForegroundColor Yellow
+Write-Host "`n[15/16] Azure SQL connectivity verification..." -ForegroundColor Yellow
 if ($DbConnected) {
     Write-Host "Database connectivity verified via health endpoint." -ForegroundColor Green
 } else {
@@ -266,7 +296,7 @@ if (Test-Path $PublishDir) { Remove-Item -Recurse -Force $PublishDir }
 if (Test-Path $PublishZip) { Remove-Item -Force $PublishZip }
 
 # ------------------------------------------------------------------------------
-# 15. Final deployment summary
+# 16. Final deployment summary
 # ------------------------------------------------------------------------------
 Write-Host "`n=====================================================" -ForegroundColor Cyan
 Write-Host " Connect Production Deployment Summary" -ForegroundColor Cyan
@@ -289,6 +319,7 @@ Write-Host "- Database connected: $DbConnected"
 Write-Host "`n### Database"
 Write-Host "- SQL server: $SqlServerName"
 Write-Host "- Database: $DatabaseName"
+Write-Host "- Migrations applied: $DbMigrationStatus"
 Write-Host "- Connectivity: Success"
 Write-Host "- Root cause/fix if any: Published with -r linux-x64 --self-contained false to resolve Microsoft.Data.SqlClient native binary issue."
 
