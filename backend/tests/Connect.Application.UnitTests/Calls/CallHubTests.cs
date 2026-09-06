@@ -25,6 +25,8 @@ public class CallHubTests
     private readonly Mock<ISender> _mediatorMock = new();
     private readonly Mock<IServiceScopeFactory> _serviceScopeFactoryMock = new();
     private readonly Mock<ILogger<CallHub>> _loggerMock = new();
+    private readonly Mock<Connect.Application.Common.Diagnostics.IDiagnosticLogService> _diagnosticLogServiceMock = new();
+    private readonly Mock<IPresenceVisibilityService> _presenceVisibilityServiceMock = new();
     private readonly Mock<IHubCallerClients<ICallHubClient>> _clientsMock = new();
     private readonly Mock<ICallHubClient> _clientProxyMock = new();
     private readonly Mock<HubCallerContext> _contextMock = new();
@@ -59,7 +61,9 @@ public class CallHubTests
             _dateTimeProviderMock.Object,
             _mediatorMock.Object,
             _serviceScopeFactoryMock.Object,
-            _loggerMock.Object)
+            _loggerMock.Object,
+            _diagnosticLogServiceMock.Object,
+            _presenceVisibilityServiceMock.Object)
         {
             Context = _contextMock.Object,
             Clients = _clientsMock.Object

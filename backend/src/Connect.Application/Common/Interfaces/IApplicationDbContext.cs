@@ -13,6 +13,8 @@ public interface IApplicationDbContext
     DbSet<Report> Reports { get; }
     DbSet<DeviceToken> DeviceTokens { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
+    DbSet<UserPresenceSetting> UserPresenceSettings { get; }
+    DbSet<PresenceVisibilityException> PresenceVisibilityExceptions { get; }
     Microsoft.EntityFrameworkCore.Infrastructure.DatabaseFacade Database { get; }
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

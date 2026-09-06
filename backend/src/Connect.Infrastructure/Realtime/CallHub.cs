@@ -25,6 +25,8 @@ public class CallHub : Hub<ICallHubClient>
     private readonly ISender _mediator;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<CallHub> _logger;
+    private readonly Connect.Application.Common.Diagnostics.IDiagnosticLogService _diagnosticLogService;
+    private readonly IPresenceVisibilityService _presenceVisibilityService;
 
     public CallHub(
         IPresenceTracker presenceTracker,
@@ -32,7 +34,9 @@ public class CallHub : Hub<ICallHubClient>
         IDateTimeProvider dateTimeProvider,
         ISender mediator,
         IServiceScopeFactory serviceScopeFactory,
-        ILogger<CallHub> logger)
+        ILogger<CallHub> logger,
+        Connect.Application.Common.Diagnostics.IDiagnosticLogService diagnosticLogService,
+        IPresenceVisibilityService presenceVisibilityService)
     {
         _presenceTracker = presenceTracker;
         _unitOfWork = unitOfWork;
@@ -40,11 +44,26 @@ public class CallHub : Hub<ICallHubClient>
         _mediator = mediator;
         _serviceScopeFactory = serviceScopeFactory;
         _logger = logger;
+        _diagnosticLogService = diagnosticLogService;
+        _presenceVisibilityService = presenceVisibilityService;
     }
 
     public override async Task OnConnectedAsync()
     {
         var userId = GetUserId();
+
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = "Info",
+            Component = "CallHub",
+            EventName = "SignalRConnected",
+            Message = $"SignalR Connected. ConnectionId: {Context.ConnectionId}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId
+        });
+
         var isFirstConnection = await _presenceTracker.UserConnectedAsync(userId, Context.ConnectionId);
 
         if (isFirstConnection)
@@ -57,7 +76,7 @@ public class CallHub : Hub<ICallHubClient>
                 await _unitOfWork.SaveChangesAsync(CancellationToken.None);
             }
 
-            await Clients.Others.UserPresenceChanged(userId, PresenceStatus.Online);
+            await BroadcastPresenceAsync(userId, PresenceStatus.Online);
         }
 
         await base.OnConnectedAsync();
@@ -66,6 +85,19 @@ public class CallHub : Hub<ICallHubClient>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var userId = GetUserId();
+
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = exception == null ? "Info" : "Error",
+            Component = "CallHub",
+            EventName = "SignalRDisconnected",
+            Message = $"SignalR Disconnected. ConnectionId: {Context.ConnectionId}. Exception: {exception?.Message}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId
+        });
+
         var isLastConnection = await _presenceTracker.UserDisconnectedAsync(userId, Context.ConnectionId);
 
         if (isLastConnection)
@@ -78,7 +110,7 @@ public class CallHub : Hub<ICallHubClient>
                 await _unitOfWork.SaveChangesAsync(CancellationToken.None);
             }
 
-            await Clients.Others.UserPresenceChanged(userId, PresenceStatus.Offline);
+            await BroadcastPresenceAsync(userId, PresenceStatus.Offline);
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -97,7 +129,7 @@ public class CallHub : Hub<ICallHubClient>
             await _unitOfWork.SaveChangesAsync(CancellationToken.None);
         }
 
-        await Clients.Others.UserPresenceChanged(userId, status);
+        await BroadcastPresenceAsync(userId, status);
     }
 
     public async Task InitiateCallAttempt(Guid calleeId)
@@ -146,6 +178,21 @@ public class CallHub : Hub<ICallHubClient>
     public async Task RespondToCall(Guid callId, bool accepted)
     {
         var userId = GetUserId();
+
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = "Info",
+            Component = "CallHub",
+            EventName = accepted ? "CallAccepted" : "CallRejected",
+            Message = $"User {userId} {(accepted ? "accepted" : "rejected")} call {callId}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId,
+            CallId = callId.ToString()
+        });
+
+        _logger.LogInformation("RespondToCall invoked for CallId: {CallId} by UserId: {UserId} with Accepted: {Accepted}", callId, userId, accepted);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null || call.CalleeId != userId)
         {
@@ -214,6 +261,20 @@ public class CallHub : Hub<ICallHubClient>
 
     public async Task EndCall(Guid callId)
     {
+        var userId = GetUserId();
+        _diagnosticLogService.LogEvent(new Connect.Application.Common.Diagnostics.DiagnosticEvent
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = DateTime.UtcNow.ToString("O"),
+            Severity = "Info",
+            Component = "CallHub",
+            EventName = "CallEnded",
+            Message = $"User {userId} ended call {callId}",
+            UserId = userId.ToString(),
+            SessionId = Context.ConnectionId,
+            CallId = callId.ToString()
+        });
+
         try
         {
             var result = await _mediator.Send(new EndCallCommand(callId));
@@ -230,6 +291,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task SendWebRtcOffer(Guid callId, string sdp)
     {
         var userId = GetUserId();
+        _logger.LogInformation("SendWebRtcOffer invoked for CallId: {CallId} by UserId: {UserId}", callId, userId);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
@@ -243,6 +305,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task SendWebRtcAnswer(Guid callId, string sdp)
     {
         var userId = GetUserId();
+        _logger.LogInformation("SendWebRtcAnswer invoked for CallId: {CallId} by UserId: {UserId}", callId, userId);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
@@ -256,6 +319,7 @@ public class CallHub : Hub<ICallHubClient>
     public async Task SendIceCandidate(Guid callId, string candidate)
     {
         var userId = GetUserId();
+        _logger.LogInformation("SendIceCandidate invoked for CallId: {CallId} by UserId: {UserId}", callId, userId);
         var call = await _unitOfWork.Calls.GetByIdAsync(callId, CancellationToken.None);
         if (call == null) return;
 
@@ -346,5 +410,23 @@ public class CallHub : Hub<ICallHubClient>
         }
 
         throw new HubException("Unauthorized: User ID not found.");
+    }
+
+    private async Task BroadcastPresenceAsync(Guid userId, PresenceStatus status)
+    {
+        var potentialViewers = await _presenceTracker.GetOnlineUsersAsync();
+        var authorizedViewers = await _presenceVisibilityService.GetAuthorizedViewersAsync(userId, potentialViewers, CancellationToken.None);
+
+        var connectionIds = new List<string>();
+        foreach (var viewerId in authorizedViewers)
+        {
+            var connections = await _presenceTracker.GetConnectionIdsForUserAsync(viewerId);
+            connectionIds.AddRange(connections);
+        }
+
+        if (connectionIds.Count > 0)
+        {
+            await Clients.Clients(connectionIds).UserPresenceChanged(userId, status);
+        }
     }
 }

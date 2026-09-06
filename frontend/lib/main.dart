@@ -4,8 +4,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:signalr_netcore/signalr_client.dart';
+import 'package:flutter/foundation.dart';
+import 'services/diagnostic_logger.dart';
 
 void main() {
   runApp(const ConnectApp());
@@ -135,23 +138,183 @@ class MainConsumerDashboard extends StatefulWidget {
 }
 
 class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
-  static const String _baseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://localhost:5200',
-  );
+  static const String _baseUrl = String.fromEnvironment('API_BASE_URL');
 
-  // DEV NOTE: Dual user slot switcher (_user1Session vs _user2Session) is for dev/e2e test harness
-  // convenience only on web. Will be removed once single-account-per-device persistent auth is standard.
-  UserSession? _user1Session;
-  UserSession? _user2Session;
-  int _activeSessionIndex = 1;
+  UserSession? _currentSession;
 
-  UserSession? get currentSession => _activeSessionIndex == 1 ? _user1Session : _user2Session;
+  UserSession? get currentSession => _currentSession;
 
   int _selectedNavIndex = 0;
+  String? _selectedHistoryContact;
 
   HubConnection? _hubConnection;
   bool _isHubConnected = false;
+
+  RTCPeerConnection? _peerConnection;
+  MediaStream? _localStream;
+  Future<void>? _webRTCSetupFuture;
+  int _webRTCSetupGeneration = 0;
+  RTCVideoRenderer? _remoteRenderer;
+  final List<RTCIceCandidate> _pendingIceCandidates = [];
+
+  String? _micErrorCategory;
+  String? _pendingRemoteOfferSdp;
+  bool _needsToSendOffer = false;
+
+  // WebRTC Recovery State
+  bool _isRecovering = false;
+  int _recoveryAttempts = 0;
+  Timer? _recoveryTimer;
+  Timer? _disconnectGraceTimer;
+  static const int _maxRecoveryAttempts = 3;
+  static const int _recoveryTimeoutSeconds = 15;
+
+  // Audio Quality Timing Diagnostics
+  int? _tsCallAccepted;
+  int? _tsWebRTCSetupStarted;
+  int? _tsGetUserMediaStarted;
+  int? _tsLocalStreamReady;
+  int? _tsPeerConnectionCreated;
+  int? _tsLocalTrackAdded;
+  int? _tsOfferCreationStarted;
+  int? _tsOfferCreationCompleted;
+  int? _tsOfferSent;
+  int? _tsAnswerReceived;
+  int? _tsIceGatheringStarted;
+  int? _tsIceGatheringCompleted;
+  int? _tsIceConnected;
+  int? _tsRemoteTrackReceived;
+  int? _tsRemoteStreamAttached;
+  int? _tsRemotePlaybackStarted;
+  Timer? _statsTimer;
+
+  void _startStatsTimer() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (_peerConnection == null) return;
+      try {
+        final stats = await _peerConnection!.getStats();
+
+        String? selectedPairId;
+        for (var report in stats) {
+          if (report.type == 'transport') {
+            selectedPairId = report.values['selectedCandidatePairId']?.toString();
+          }
+        }
+
+        StatsReport? activePair;
+        Map<String, dynamic> localCandidates = {};
+        Map<String, dynamic> remoteCandidates = {};
+
+        for (var report in stats) {
+          if (report.type == 'local-candidate') {
+            localCandidates[report.id] = report.values;
+          } else if (report.type == 'remote-candidate') {
+            remoteCandidates[report.id] = report.values;
+          } else if (report.type == 'candidate-pair') {
+            bool isSelected = (selectedPairId != null && report.id == selectedPairId) ||
+                              report.values['nominated'] == true ||
+                              report.values['selected'] == true;
+            if (isSelected) {
+              activePair = report;
+            }
+          }
+        }
+
+        for (var report in stats) {
+          if (report.type == 'inbound-rtp' && report.values['kind'] == 'audio') {
+            final packetsReceived = report.values['packetsReceived'];
+            final packetsLost = report.values['packetsLost'];
+            final jitter = report.values['jitter'];
+            final bytesReceived = report.values['bytesReceived'];
+            _log('Audio inbound stats - Received: $packetsReceived, Lost: $packetsLost, Jitter: $jitter, Bytes: $bytesReceived');
+          } else if (report.type == 'outbound-rtp' && report.values['kind'] == 'audio') {
+            final packetsSent = report.values['packetsSent'];
+            final bytesSent = report.values['bytesSent'];
+            _log('Audio outbound stats - Sent: $packetsSent, Bytes: $bytesSent');
+          }
+        }
+
+        if (activePair != null) {
+          final state = activePair.values['state'];
+          final currentRoundTripTime = activePair.values['currentRoundTripTime'];
+          final availableOutgoingBitrate = activePair.values['availableOutgoingBitrate'];
+          final nominated = activePair.values['nominated'] ?? activePair.values['selected'];
+
+          final localId = activePair.values['localCandidateId'];
+          final remoteId = activePair.values['remoteCandidateId'];
+
+          String localType = 'unknown';
+          String remoteType = 'unknown';
+          String protocol = 'unknown';
+
+          if (localId != null && localCandidates.containsKey(localId)) {
+            localType = localCandidates[localId]['candidateType']?.toString() ?? 'unknown';
+            protocol = localCandidates[localId]['protocol']?.toString() ?? 'unknown';
+          }
+          if (remoteId != null && remoteCandidates.containsKey(remoteId)) {
+            remoteType = remoteCandidates[remoteId]['candidateType']?.toString() ?? 'unknown';
+            if (protocol == 'unknown') {
+               protocol = remoteCandidates[remoteId]['protocol']?.toString() ?? 'unknown';
+            }
+          }
+
+          _log('Active ICE Pair - State: $state, LocalType: $localType, RemoteType: $remoteType, Protocol: $protocol, RTT: $currentRoundTripTime, Bitrate: $availableOutgoingBitrate, Nominated: $nominated');
+        }
+      } catch (e) {
+        _log('Failed to collect WebRTC stats: $e');
+      }
+    });
+  }
+
+  void _printCallSummary() {
+    if (_tsCallAccepted != null && _tsRemotePlaybackStarted != null) {
+      _log('--- Call Quality Timing Summary ---');
+
+      void logTiming(String label, int? start, int? end) {
+        if (start != null && end != null) {
+          if (end >= start) {
+            _log('$label: ${end - start}ms');
+          } else {
+            _log('$label: unavailable (out of order)');
+          }
+        }
+      }
+
+      logTiming('call accepted -> local stream ready', _tsCallAccepted, _tsLocalStreamReady ?? _tsCallAccepted);
+      logTiming('local stream ready -> offer created', _tsLocalStreamReady, _tsOfferCreationCompleted);
+      logTiming('offer sent -> answer received', _tsOfferSent, _tsAnswerReceived);
+      logTiming('answer received -> ICE connected', _tsAnswerReceived, _tsIceConnected);
+      logTiming('ICE connected -> remote track received', _tsIceConnected, _tsRemoteTrackReceived);
+      logTiming('remote track received -> remote playback started', _tsRemoteTrackReceived, _tsRemotePlaybackStarted);
+      logTiming('call accepted -> remote playback started', _tsCallAccepted, _tsRemotePlaybackStarted);
+      logTiming('ICE gathering time', _tsIceGatheringStarted, _tsIceGatheringCompleted);
+
+      _log('-----------------------------------');
+    }
+  }
+
+  Future<void> _processPendingIceCandidates() async {
+    if (_peerConnection == null) return;
+
+    final remoteDesc = await _peerConnection!.getRemoteDescription();
+    if (remoteDesc == null || remoteDesc.sdp == null) return;
+
+    if (_pendingIceCandidates.isEmpty) return;
+
+    _log('Processing ${_pendingIceCandidates.length} queued ICE candidates...');
+    final processed = <RTCIceCandidate>[];
+    for (var candidate in _pendingIceCandidates) {
+      try {
+        await _peerConnection!.addCandidate(candidate);
+        _log('ReceiveIceCandidate: candidate processed? true (from queue)');
+        processed.add(candidate);
+      } catch (e) {
+        _log('Failed to process queued ICE Candidate: $e');
+      }
+    }
+    _pendingIceCandidates.removeWhere((c) => processed.contains(c));
+  }
 
   final TextEditingController _searchQueryController = TextEditingController();
   List<dynamic> _searchResults = [];
@@ -161,6 +324,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   List<dynamic> _sentRequests = [];
   List<dynamic> _connections = [];
   List<dynamic> _blockedUsers = [];
+  int _presenceVisibility = 1;
+  List<dynamic> _presenceExceptions = [];
+  String _myPresenceStatus = 'Offline';
+  String _intendedPresenceStatus = 'Online';
   List<dynamic> _callHistory = [];
 
   final FocusNode _loginEmailFocusNode = FocusNode();
@@ -214,17 +381,423 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   final TextEditingController _reportReasonController = TextEditingController();
   final TextEditingController _reportNoteController = TextEditingController();
 
-  final List<String> _consoleLogs = [];
   bool _showDevConsole = false;
 
   void _log(String message) {
-    final timestamp = DateTime.now().toIso8601String().substring(11, 19);
+    DiagnosticLogger().log(message);
+    if (!kReleaseMode) {
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
+
+  void _downloadLogs() {
+    final timestamp = DateTime.now().toIso8601String().replaceAll(':', '').replaceAll('-', '').replaceFirst('T', '-').split('.')[0];
+    final filename = 'connect-developer-logs-$timestamp.txt';
+
+    final logsContent = DiagnosticLogger().getLogs().reversed.map((logEvent) {
+      return '[${logEvent.timestamp}] ${logEvent.message}';
+    }).join('\n');
+
+    final bytes = utf8.encode(logsContent);
+    final blob = html.Blob([bytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    html.AnchorElement(href: url)
+      ..setAttribute('download', filename)
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+  }
+
+  html.DivElement? _debugPanel;
+  String _debugConnState = 'unknown';
+  String _debugIceState = 'unknown';
+  bool _debugOnTrackFired = false;
+  String _debugTrackKind = 'none';
+
+  void _updateWebRTCDebugPanel({String? connState, String? iceState, bool? onTrackFired, String? trackKind}) {
+    if (_debugPanel == null) {
+      _debugPanel = html.DivElement()
+        ..id = 'webrtc-debug-panel'
+        ..style.position = 'fixed'
+        ..style.bottom = '10px'
+        ..style.right = '10px'
+        ..style.backgroundColor = 'rgba(0, 0, 0, 0.8)'
+        ..style.color = 'white'
+        ..style.padding = '10px'
+        ..style.borderRadius = '5px'
+        ..style.zIndex = '9999'
+        ..style.fontFamily = 'monospace'
+        ..style.fontSize = '12px'
+        ..style.pointerEvents = 'none';
+      html.document.body?.append(_debugPanel!);
+    }
+    if (connState != null) _debugConnState = connState;
+    if (iceState != null) _debugIceState = iceState;
+    if (onTrackFired != null) _debugOnTrackFired = onTrackFired;
+    if (trackKind != null) _debugTrackKind = trackKind;
+
+    _debugPanel!.innerHtml = '''
+      <strong>WebRTC State</strong><br>
+      Conn State: $_debugConnState<br>
+      ICE State: $_debugIceState<br>
+      onTrack: $_debugOnTrackFired (kind: $_debugTrackKind)
+    ''';
+  }
+
+  Future<Map<String, dynamic>?> _fetchTurnCredentials() async {
+    _log('TURN credential request started');
+    try {
+      final res = await _authenticatedApiCall((token) => http.get(
+        Uri.parse('$_baseUrl/api/v1/turn/credentials'),
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res != null && res.statusCode == 200) {
+        _log('TURN credential request succeeded');
+        return jsonDecode(res.body);
+      } else {
+        _log('TURN credential request failed (Status: ${res?.statusCode}). Proceeding with STUN only.');
+      }
+    } catch (e) {
+      _log('TURN credential request encountered an exception. Proceeding with STUN only.');
+    }
+    return null;
+  }
+
+  Future<void> _ensureWebRTCSetup() {
+    if (_peerConnection != null) return Future.value();
+    if (_webRTCSetupFuture != null) return _webRTCSetupFuture!;
+    _webRTCSetupFuture = _setupWebRTC();
+    return _webRTCSetupFuture!;
+  }
+
+  Future<void> _setupWebRTC() async {
+    final int currentGeneration = ++_webRTCSetupGeneration;
+
+    _tsWebRTCSetupStarted = DateTime.now().millisecondsSinceEpoch;
+    _log('Initializing RTCPeerConnection... [ts: $_tsWebRTCSetupStarted]');
+    _updateWebRTCDebugPanel();
+
+    final List<Map<String, dynamic>> iceServers = [
+      {
+        'urls': 'stun:stun.l.google.com:19302',
+      },
+    ];
+
+    final turnCreds = await _fetchTurnCredentials();
+    if (currentGeneration != _webRTCSetupGeneration) {
+      _log('WebRTC setup cancelled during TURN credential fetch.');
+      return;
+    }
+
+    if (turnCreds != null) {
+      final uris = (turnCreds['uris'] as List<dynamic>?)?.cast<String>() ?? [];
+      final username = turnCreds['username']?.toString();
+      final password = turnCreds['password']?.toString();
+      final ttl = turnCreds['ttl'];
+
+      if (uris.isNotEmpty && username != null && password != null) {
+        _log('number of returned TURN URIs: ${uris.length}, TTL: $ttl');
+        iceServers.add({
+          'urls': uris,
+          'username': username,
+          'credential': password,
+        });
+      }
+    }
+
+    _log('ICE server count: ${iceServers.length}');
+
+    final configuration = <String, dynamic>{
+      'iceServers': iceServers,
+    };
+
+    final pc = await createPeerConnection(configuration);
+    if (currentGeneration != _webRTCSetupGeneration) {
+      _log('WebRTC setup cancelled during PeerConnection creation.');
+      await pc.close();
+      return;
+    }
+
+    _peerConnection = pc;
+    _tsPeerConnectionCreated = DateTime.now().millisecondsSinceEpoch;
+    _log('PeerConnection created. [ts: $_tsPeerConnectionCreated]');
+
+    _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
+      _log('WebRTC Connection State changed to: $state [ts: ${DateTime.now().millisecondsSinceEpoch}]');
+      _updateWebRTCDebugPanel(connState: state.toString());
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _startStatsTimer();
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _disconnectGraceTimer?.cancel();
+        _triggerRecovery();
+      }
+    };
+
+
+
+    _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      _log('WebRTC ICE Connection State changed to: $state [ts: $now]');
+
+
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+          _tsIceConnected = now;
+        }
+        _disconnectGraceTimer?.cancel();
+        if (_isRecovering) {
+          _isRecovering = false;
+          _recoveryAttempts = 0;
+          _recoveryTimer?.cancel();
+          if (mounted) {
+            setState(() {
+              _callStatusText = 'Connection restored';
+            });
+            Timer(const Duration(seconds: 2), () {
+              if (mounted && _isActiveCall && !_isRecovering) {
+                setState(() {
+                  _callStatusText = 'Connected';
+                });
+              }
+            });
+          }
+        } else {
+          if (mounted && _isActiveCall && _callStatusText == 'Retrying microphone...') {
+            setState(() {
+              _callStatusText = 'Connected';
+            });
+          }
+        }
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _disconnectGraceTimer?.cancel();
+        _triggerRecovery();
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+        _disconnectGraceTimer?.cancel();
+        _disconnectGraceTimer = Timer(const Duration(seconds: 3), () {
+          if (_peerConnection != null) {
+            _triggerRecovery();
+          }
+        });
+      }
+
+      _updateWebRTCDebugPanel(iceState: state.toString());
+    };
+
+    _peerConnection!.onIceGatheringState = (RTCIceGatheringState state) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      _log('WebRTC ICE Gathering State changed to: $state [ts: $now]');
+      if (state == RTCIceGatheringState.RTCIceGatheringStateGathering) {
+        _tsIceGatheringStarted ??= now;
+      } else if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
+        _tsIceGatheringCompleted = now;
+      }
+    };
+
+    _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+      if (_activeCallId != null && _hubConnection != null) {
+        _log('Gathered ICE Candidate, sending to remote... [ts: ${DateTime.now().millisecondsSinceEpoch}]');
+        _hubConnection!.invoke('SendIceCandidate', args: [_activeCallId!, jsonEncode(candidate.toMap())]);
+      }
+    };
+
+    _peerConnection!.onTrack = (RTCTrackEvent event) {
+      _tsRemoteTrackReceived = DateTime.now().millisecondsSinceEpoch;
+      _log('WebRTC Event: onTrack fired, track kind=${event.track.kind}, stream count=${event.streams.length} [ts: $_tsRemoteTrackReceived]');
+      _updateWebRTCDebugPanel(onTrackFired: true, trackKind: event.track.kind ?? 'unknown');
+      if (event.track.kind == 'audio' && event.streams.isNotEmpty) {
+        _remoteRenderer?.srcObject = event.streams[0];
+        _tsRemoteStreamAttached = DateTime.now().millisecondsSinceEpoch;
+        _log('WebRTC Event: remote stream attached [ts: $_tsRemoteStreamAttached]');
+        _tsRemotePlaybackStarted = DateTime.now().millisecondsSinceEpoch;
+      }
+    };
+
+    try {
+      final Map<String, dynamic> mediaConstraints = {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': false,
+      };
+      _tsGetUserMediaStarted = DateTime.now().millisecondsSinceEpoch;
+      _log('Calling getUserMedia... [ts: $_tsGetUserMediaStarted]');
+      final stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+
+      if (currentGeneration != _webRTCSetupGeneration) {
+        _log('WebRTC setup cancelled during mic access. Releasing mic immediately.');
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      _localStream = stream;
+      _tsLocalStreamReady = DateTime.now().millisecondsSinceEpoch;
+      _log('Local audio stream obtained. [ts: $_tsLocalStreamReady]');
+
+      try {
+        final audioTracks = _localStream!.getAudioTracks();
+        if (audioTracks.isNotEmpty) {
+          final track = audioTracks.first;
+          final settings = track.getSettings();
+          _log('--- Audio Constraints Diagnostics ---');
+          _log('Requested constraints: ${mediaConstraints['audio']}');
+          _log('Actual getSettings(): $settings');
+          _log('echoCancellation actually enabled: ${settings['echoCancellation']}');
+          _log('noiseSuppression actually enabled: ${settings['noiseSuppression']}');
+          _log('autoGainControl actually enabled: ${settings['autoGainControl']}');
+          _log('-----------------------------------');
+        }
+      } catch (e) {
+        _log('Failed to read audio track settings: $e');
+      }
+
+      _localStream!.getAudioTracks().forEach((track) {
+        track.onEnded = () {
+          _log('Local audio track ended unexpectedly (e.g. mic unplugged or permission revoked).');
+          if (mounted && _isActiveCall) {
+             setState(() {
+               _micErrorCategory = 'permissionDenied';
+               _callStatusText = 'Microphone Disconnected';
+             });
+             _needsToSendOffer = true;
+             _teardownWebRTC(preserveCallState: true);
+          }
+        };
+        _peerConnection!.addTrack(track, _localStream!);
+      });
+      _tsLocalTrackAdded = DateTime.now().millisecondsSinceEpoch;
+      _log('Local mic stream attached to peer connection. [ts: $_tsLocalTrackAdded]');
+    } catch (e) {
+      _log('Failed to capture mic during WebRTC setup: $e');
+      final errorStr = e.toString().toLowerCase();
+      String category = 'genericMediaError';
+      if (errorStr.contains('notallowed') || errorStr.contains('permission denied') || errorStr.contains('denied') || errorStr.contains('not allowed')) {
+        category = 'permissionDenied';
+      } else if (errorStr.contains('notfound') || errorStr.contains('requested device not found') || errorStr.contains('no microphone')) {
+        category = 'noMicrophone';
+      } else if (errorStr.contains('notreadable') || errorStr.contains('could not start video source') || errorStr.contains('in use') || errorStr.contains('hardware')) {
+        category = 'microphoneInUse';
+      } else if (errorStr.contains('overconstrained')) {
+        category = 'microphoneUnavailable';
+      }
+
+      _log('Microphone error classified as: $category');
+
+      if (mounted) {
+        setState(() {
+          _micErrorCategory = category;
+          _callStatusText = 'Microphone Error';
+        });
+      }
+
+      await _teardownWebRTC(preserveCallState: true);
+      return;
+    }
+  }
+
+  Future<void> _testMicCapture() async {
+    _log('Testing microphone access via getUserMedia...');
+    try {
+      final Map<String, dynamic> mediaConstraints = {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': false,
+      };
+
+      final MediaStream stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      final tracks = stream.getAudioTracks();
+
+      _log('Mic capture SUCCESS: Stream ID = ${stream.id}');
+      _log('Audio tracks count: ${tracks.length}');
+      for (var i = 0; i < tracks.length; i++) {
+        final track = tracks[i];
+        _log('Track #$i: kind=${track.kind}, label="${track.label}", enabled=${track.enabled}, muted=${track.muted}');
+      }
+
+      if (mounted) {
+        final trackLabel = tracks.isNotEmpty ? tracks.first.label : 'audio';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Mic acquired successfully! Tracks: ${tracks.length} ($trackLabel)'),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      final errorMsg = 'Mic capture failed: $e';
+      _log(errorMsg);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMsg),
+            backgroundColor: const Color(0xFFE11D48),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _processPendingOfferCreation() async {
+    if (!_needsToSendOffer || _peerConnection == null || _activeCallId == null) return;
+
+    _tsOfferCreationStarted = DateTime.now().millisecondsSinceEpoch;
+    _log('Creating SDP Offer... [ts: $_tsOfferCreationStarted]');
+    RTCSessionDescription offer = await _peerConnection!.createOffer();
+    _tsOfferCreationCompleted = DateTime.now().millisecondsSinceEpoch;
+    _log('SDP Offer created. [ts: $_tsOfferCreationCompleted]');
+    await _peerConnection!.setLocalDescription(offer);
+    _log('Sending SDP Offer via SignalR...');
+    _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
+    _tsOfferSent = DateTime.now().millisecondsSinceEpoch;
+    _log('SDP Offer sent. [ts: $_tsOfferSent]');
+    _needsToSendOffer = false;
+  }
+
+  Future<void> _processPendingOffer() async {
+    if (_pendingRemoteOfferSdp == null || _peerConnection == null || _activeCallId == null) return;
+
+    _log('Setting Remote Description (Offer)...');
+    await _peerConnection!.setRemoteDescription(RTCSessionDescription(_pendingRemoteOfferSdp!, 'offer'));
+    _log('ReceiveWebRtcOffer: state transition -> setRemoteDescription(offer) succeeded.');
+    await _processPendingIceCandidates();
+
+    _log('Creating SDP Answer...');
+    RTCSessionDescription answer = await _peerConnection!.createAnswer();
+    await _peerConnection!.setLocalDescription(answer);
+
+    _log('Sending SDP Answer via SignalR...');
+    _hubConnection!.invoke('SendWebRtcAnswer', args: [_activeCallId!, answer.sdp!]);
+    _pendingRemoteOfferSdp = null;
+  }
+
+  Future<void> _retryMicSetup() async {
     setState(() {
-      _consoleLogs.insert(0, '[$timestamp] $message');
+      _micErrorCategory = null;
+      _callStatusText = 'Retrying microphone...';
     });
+
+    await _ensureWebRTCSetup();
+    if (_peerConnection != null) {
+      if (_needsToSendOffer) {
+        await _processPendingOfferCreation();
+      } else if (_pendingRemoteOfferSdp != null) {
+        await _processPendingOffer();
+      }
+    }
   }
 
   Timer? _expiryTimer;
+  Future<bool>? _refreshFuture;
 
   String _decodeBase64(String str) {
     String output = str.replaceAll('-', '+').replaceAll('_', '/');
@@ -278,6 +851,27 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     final expiryDate = _getJwtExpiry(token);
     if (expiryDate == null) return false;
 
+    void scheduleWithCap(Duration timeRemaining) {
+      const maxDuration = Duration(days: 20); // Safe limit under JS's 24.8 day max
+      if (timeRemaining <= maxDuration) {
+        _expiryTimer = Timer(timeRemaining, () {
+          _log('Proactive JWT expiry timer fired after ${timeRemaining.inSeconds}s idle.');
+          _onTokenExpired();
+        });
+      } else {
+        _expiryTimer = Timer(maxDuration, () {
+          _log('JWT expiry timer cap reached (20 days). Rescheduling remaining...');
+          final actualRemaining = expiryDate.difference(DateTime.now().toUtc());
+          if (actualRemaining.inMilliseconds <= 0) {
+            _log('JWT token is expired. Triggering silent refresh before logout.');
+            _onTokenExpired();
+          } else {
+            scheduleWithCap(actualRemaining);
+          }
+        });
+      }
+    }
+
     final remaining = expiryDate.difference(DateTime.now().toUtc());
     _log('JWT expiry time: ${expiryDate.toIso8601String()} (remaining: ${remaining.inSeconds}s)');
 
@@ -286,10 +880,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _onTokenExpired();
       return true;
     } else {
-      _expiryTimer = Timer(remaining, () {
-        _log('Proactive JWT expiry timer fired after ${remaining.inSeconds}s idle.');
-        _onTokenExpired();
-      });
+      scheduleWithCap(remaining);
       return false;
     }
   }
@@ -301,14 +892,26 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<bool> _attemptSilentRefresh() async {
+  Future<bool> _attemptSilentRefresh() {
+    if (_refreshFuture != null) {
+      _log('Silent refresh already in flight. Waiting for completion.');
+      return _refreshFuture!;
+    }
+    final future = _executeSilentRefresh();
+    _refreshFuture = future;
+    return future.whenComplete(() {
+      _refreshFuture = null;
+    });
+  }
+
+  Future<bool> _executeSilentRefresh() async {
     final session = currentSession;
     if (session == null || session.refreshToken.isEmpty) {
       _log('Silent refresh aborted: no active session or refresh token available.');
       return false;
     }
 
-    _log('Attempting silent token refresh for slot $_activeSessionIndex (@${session.handle})...');
+    _log('Attempting silent token refresh (@${session.handle})...');
     try {
       final res = await http.post(
         Uri.parse('$_baseUrl/api/v1/auth/refresh'),
@@ -328,16 +931,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         );
 
         if (updatedSession.token.isNotEmpty && updatedSession.refreshToken.isNotEmpty) {
-          _saveSessionToLocalStorage(updatedSession, _activeSessionIndex);
+          _saveSessionToLocalStorage(updatedSession);
           setState(() {
-            if (_activeSessionIndex == 1) {
-              _user1Session = updatedSession;
-            } else {
-              _user2Session = updatedSession;
-            }
+            _currentSession = updatedSession;
           });
           _scheduleExpiryTimer(updatedSession.token);
-          _log('Silent refresh successful for slot $_activeSessionIndex. Access & refresh tokens rotated.');
+          _log('Silent refresh successful. Access & refresh tokens rotated.');
           return true;
         }
       }
@@ -368,9 +967,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   // --- LocalStorage Session Persistence Helpers ---
-  void _saveSessionToLocalStorage(UserSession session, [int? slot]) {
-    final s = slot ?? _activeSessionIndex;
-    final prefix = s == 2 ? 'connect_u2_' : 'connect_';
+  void _saveSessionToLocalStorage(UserSession session) {
+    const prefix = 'connect_';
     try {
       html.window.localStorage['${prefix}token'] = session.token;
       html.window.localStorage['${prefix}refresh_token'] = session.refreshToken;
@@ -380,52 +978,34 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     } catch (e) {
       _log('Error saving session to localStorage: $e');
     }
+    DiagnosticLogger().setContext(
+      userId: session.id,
+    );
   }
 
   void _loadSessionFromLocalStorage() {
     try {
-      // Slot 1
-      final token1 = html.window.localStorage['connect_token'];
-      final refresh1 = html.window.localStorage['connect_refresh_token'] ?? '';
-      final id1 = html.window.localStorage['connect_id'];
-      final email1 = html.window.localStorage['connect_email'];
-      final handle1 = html.window.localStorage['connect_handle'];
+      final token = html.window.localStorage['connect_token'];
+      final refresh = html.window.localStorage['connect_refresh_token'] ?? '';
+      final id = html.window.localStorage['connect_id'];
+      final email = html.window.localStorage['connect_email'];
+      final handle = html.window.localStorage['connect_handle'];
 
-      if (token1 != null && token1.isNotEmpty && handle1 != null && handle1.isNotEmpty) {
-        _user1Session = UserSession(
-          token: token1,
-          refreshToken: refresh1,
-          id: id1 ?? '',
-          email: email1 ?? '',
-          handle: handle1,
+      if (token != null && token.isNotEmpty && handle != null && handle.isNotEmpty) {
+        _currentSession = UserSession(
+          token: token,
+          refreshToken: refresh,
+          id: id ?? '',
+          email: email ?? '',
+          handle: handle,
+        );
+        DiagnosticLogger().setContext(
+          userId: id,
         );
       }
 
-      // Slot 2
-      final token2 = html.window.localStorage['connect_u2_token'];
-      final refresh2 = html.window.localStorage['connect_u2_refresh_token'] ?? '';
-      final id2 = html.window.localStorage['connect_u2_id'];
-      final email2 = html.window.localStorage['connect_u2_email'];
-      final handle2 = html.window.localStorage['connect_u2_handle'];
-
-      if (token2 != null && token2.isNotEmpty && handle2 != null && handle2.isNotEmpty) {
-        _user2Session = UserSession(
-          token: token2,
-          refreshToken: refresh2,
-          id: id2 ?? '',
-          email: email2 ?? '',
-          handle: handle2,
-        );
-      }
-
-      if (_user1Session != null) {
-        _activeSessionIndex = 1;
-        _scheduleExpiryTimer(_user1Session!.token);
-        _connectSignalR();
-        _refreshActiveTabData();
-      } else if (_user2Session != null) {
-        _activeSessionIndex = 2;
-        _scheduleExpiryTimer(_user2Session!.token);
+      if (_currentSession != null) {
+        _scheduleExpiryTimer(_currentSession!.token);
         _connectSignalR();
         _refreshActiveTabData();
       }
@@ -434,9 +1014,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  void _clearSessionFromLocalStorage([int? slot]) {
-    final s = slot ?? _activeSessionIndex;
-    final prefix = s == 2 ? 'connect_u2_' : 'connect_';
+  void _clearSessionFromLocalStorage() {
+    const prefix = 'connect_';
     try {
       html.window.localStorage.remove('${prefix}token');
       html.window.localStorage.remove('${prefix}refresh_token');
@@ -449,16 +1028,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _handle401() {
+    _teardownWebRTC();
     _expiryTimer?.cancel();
     _expiryTimer = null;
-    _clearSessionFromLocalStorage(_activeSessionIndex);
+    _clearSessionFromLocalStorage();
     _hubConnection?.stop();
     setState(() {
-      if (_activeSessionIndex == 1) {
-        _user1Session = null;
-      } else {
-        _user2Session = null;
-      }
+      _currentSession = null;
       _isHubConnected = false;
       _authSuccessMessage = null;
       _authErrorMessage = null;
@@ -474,6 +1050,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   }
 
   void _logout() async {
+    DiagnosticLogger().clearSession();
+    _teardownWebRTC();
     _expiryTimer?.cancel();
     _expiryTimer = null;
 
@@ -491,24 +1069,25 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     }
 
-    _clearSessionFromLocalStorage(_activeSessionIndex);
+    _clearSessionFromLocalStorage();
     _hubConnection?.stop();
     setState(() {
-      if (_activeSessionIndex == 1) {
-        _user1Session = null;
-      } else {
-        _user2Session = null;
-      }
+      _currentSession = null;
       _isHubConnected = false;
       _authSuccessMessage = 'Logged out successfully.';
       _authErrorMessage = null;
     });
-    _log('Logged out slot $_activeSessionIndex and cleared localStorage session');
+    _log('Logged out and cleared localStorage session');
   }
 
   @override
   void initState() {
     super.initState();
+    DiagnosticLogger().init(apiBaseUrl: '$_baseUrl/api/v1');
+    _remoteRenderer = RTCVideoRenderer();
+    _remoteRenderer!.initialize().then((_) {
+      if (mounted) setState(() {});
+    });
 
     _loadSessionFromLocalStorage();
 
@@ -580,6 +1159,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
   @override
   void dispose() {
+    _teardownWebRTC();
+    _remoteRenderer?.dispose();
     _expiryTimer?.cancel();
     _expiryTimer = null;
     _hubConnection?.stop();
@@ -704,8 +1285,55 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         .withAutomaticReconnect()
         .build();
 
+    _hubConnection!.onclose(({error}) {
+      _log('SignalR Connection Closed -> $error');
+      _teardownWebRTC();
+      if (mounted) {
+        setState(() {
+          _isHubConnected = false;
+          _isRinging = false;
+          _isIncomingCall = false;
+          _isActiveCall = false;
+          _activeCallId = null;
+          _myPresenceStatus = 'Offline';
+        });
+      }
+    });
+
+    _hubConnection!.onreconnecting(({error}) {
+      _log('SignalR Reconnecting -> $error');
+      if (mounted) {
+        setState(() {
+          _isHubConnected = false;
+          _myPresenceStatus = 'Offline';
+        });
+      }
+    });
+
+    _hubConnection!.onreconnected(({connectionId}) {
+      _log('SignalR Reconnected -> $connectionId');
+      _updateMyPresence(_intendedPresenceStatus);
+      if (mounted) {
+        setState(() {
+          _isHubConnected = true;
+          _myPresenceStatus = _intendedPresenceStatus;
+        });
+      }
+    });
+
     _hubConnection!.on('UserPresenceChanged', (args) {
       _log('SignalR Event: UserPresenceChanged -> $args');
+      if (args != null && args.length >= 2) {
+        final userId = args[0] as String;
+        final status = args[1]?.toString() ?? '';
+        if (userId == currentSession?.id) {
+          if (mounted) {
+            setState(() {
+              _myPresenceStatus = status;
+            });
+          }
+        }
+      }
       _fetchConnections();
     });
 
@@ -722,28 +1350,49 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           _isRinging = false;
           _isActiveCall = false;
           _ringTimerSeconds = 15;
-          _callStatusText = 'Incoming call from $callerHandle';
+          _micErrorCategory = null;
+          _callStatusText = 'Incoming call from @$callerHandle';
         });
 
         _startRingCountdown();
       }
     });
 
-    _hubConnection!.on('CallAccepted', (args) {
-      _log('SignalR Event: CallAccepted -> $args');
+    _hubConnection!.on('CallAccepted', (args) async {
+      _tsCallAccepted = DateTime.now().millisecondsSinceEpoch;
+      _log('SignalR Event: CallAccepted -> $args [ts: $_tsCallAccepted]');
+
+      if (args != null && args.isNotEmpty) {
+        _activeCallId = args[0].toString();
+        _log('Resolved activeCallId from CallAccepted: $_activeCallId');
+      }
+
+      if (_activeCallId == null) {
+        _log('Error: _activeCallId is null, cannot proceed with WebRTC setup.');
+        return;
+      }
+
       _ringTimer?.cancel();
       setState(() {
         _isRinging = false;
         _isIncomingCall = false;
         _isActiveCall = true;
-        _callStatusText = 'Call Active';
+        _callStatusText = 'Connected';
         _callTimerSeconds = 0;
       });
       _startCallTimer();
+
+      _needsToSendOffer = true;
+      await _ensureWebRTCSetup();
+      if (_peerConnection != null) {
+        await _processPendingOfferCreation();
+      }
     });
 
-    _hubConnection!.on('CallRejected', (args) {
+    _hubConnection!.on('CallRejected', (args) async {
       _log('SignalR Event: CallRejected -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
+      await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
       setState(() {
@@ -751,13 +1400,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isIncomingCall = false;
         _isActiveCall = false;
         _activeCallId = null;
-        _callStatusText = 'Call Rejected by recipient';
+        _callStatusText = 'Call declined';
       });
       _fetchCallHistory();
     });
 
-    _hubConnection!.on('CallEnded', (args) {
+    _hubConnection!.on('CallEnded', (args) async {
       _log('SignalR Event: CallEnded -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
+      await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
       setState(() {
@@ -765,13 +1416,15 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isIncomingCall = false;
         _isActiveCall = false;
         _activeCallId = null;
-        _callStatusText = 'Call Ended';
+        _callStatusText = 'Call ended';
       });
       _fetchCallHistory();
     });
 
-    _hubConnection!.on('CallTimeout', (args) {
+    _hubConnection!.on('CallTimeout', (args) async {
       _log('SignalR Event: CallTimeout -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
+      await _teardownWebRTC();
       _ringTimer?.cancel();
       _callTimer?.cancel();
       setState(() {
@@ -779,24 +1432,28 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _isIncomingCall = false;
         _isActiveCall = false;
         _activeCallId = null;
-        _callStatusText = 'Call Timed Out (15s Ringing)';
+        _callStatusText = 'No answer';
       });
       _fetchCallHistory();
     });
 
-    _hubConnection!.on('CalleeUnavailable', (args) {
+    _hubConnection!.on('CalleeUnavailable', (args) async {
       _log('SignalR Event: CalleeUnavailable -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
+      await _teardownWebRTC();
       setState(() {
         _isRinging = false;
-        _callStatusText = 'Callee Unavailable';
+        _callStatusText = 'User is unavailable';
       });
     });
 
-    _hubConnection!.on('CalleeBusy', (args) {
+    _hubConnection!.on('CalleeBusy', (args) async {
       _log('SignalR Event: CalleeBusy -> $args');
+      if (args != null && args.isNotEmpty && _activeCallId != null && args[0].toString() != _activeCallId) return;
+      await _teardownWebRTC();
       setState(() {
         _isRinging = false;
-        _callStatusText = 'Callee Busy';
+        _callStatusText = 'User is busy';
       });
     });
 
@@ -831,14 +1488,91 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     });
 
+    _hubConnection!.on('ReceiveWebRtcOffer', (args) async {
+      _log('SignalR Event: ReceiveWebRtcOffer -> $args');
+      if (args != null && args.length >= 2) {
+        final callId = args[0].toString();
+        if (_activeCallId == null || callId != _activeCallId) return;
+        final sdp = args[1].toString();
+        _pendingRemoteOfferSdp = sdp;
+        _log('ReceiveWebRtcOffer: callId=$callId');
+
+        await _ensureWebRTCSetup();
+        _log('ReceiveWebRtcOffer: peer connection exists? ${_peerConnection != null}');
+        if (_peerConnection != null) {
+          await _processPendingOffer();
+        }
+      }
+    });
+
+    _hubConnection!.on('ReceiveWebRtcAnswer', (args) async {
+      _tsAnswerReceived = DateTime.now().millisecondsSinceEpoch;
+      _log('SignalR Event: ReceiveWebRtcAnswer -> $args [ts: $_tsAnswerReceived]');
+      if (args != null && args.length >= 2) {
+        final callId = args[0].toString();
+        if (_activeCallId == null || callId != _activeCallId) return;
+        _log('ReceiveWebRtcAnswer: callId=$callId');
+        _log('ReceiveWebRtcAnswer: peer connection exists? ${_peerConnection != null}');
+        if (_peerConnection != null) {
+          final sdp = args[1].toString();
+          _log('Setting Remote Description (Answer)...');
+          await _peerConnection!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+          _log('ReceiveWebRtcAnswer: state transition -> setRemoteDescription(answer) succeeded.');
+          await _processPendingIceCandidates();
+        }
+      }
+    });
+
+    _hubConnection!.on('ReceiveIceCandidate', (args) async {
+      _log('SignalR Event: ReceiveIceCandidate -> $args');
+      if (args != null && args.length >= 2) {
+        final callId = args[0].toString();
+        _log('ReceiveIceCandidate: callId=$callId');
+        if (_activeCallId == null || callId != _activeCallId) {
+          _log('Discarding ICE candidate for non-active call.');
+          return;
+        }
+
+        final candidateJson = args[1].toString();
+        try {
+          final Map<String, dynamic> candidateMap = jsonDecode(candidateJson);
+          final candidate = RTCIceCandidate(
+            candidateMap['candidate'],
+            candidateMap['sdpMid'],
+            candidateMap['sdpMLineIndex'] ?? candidateMap['sdpMlineIndex']
+          );
+
+          _log('ReceiveIceCandidate: peer connection exists? ${_peerConnection != null}');
+          RTCSessionDescription? remoteDesc;
+          if (_peerConnection != null) {
+            remoteDesc = await _peerConnection!.getRemoteDescription();
+          }
+
+          bool remoteDescExists = remoteDesc != null && remoteDesc.sdp != null;
+          _log('ReceiveIceCandidate: remote description exists? $remoteDescExists');
+
+          if (_peerConnection == null || !remoteDescExists) {
+            _pendingIceCandidates.add(candidate);
+            _log('ReceiveIceCandidate: candidate queued? true (Total: ${_pendingIceCandidates.length})');
+          } else {
+            await _peerConnection!.addCandidate(candidate);
+            _log('ReceiveIceCandidate: candidate processed? true (Added immediately)');
+          }
+        } catch (e) {
+          _log('Error parsing/adding ICE candidate: $e');
+        }
+      }
+    });
+
 
 
     try {
       await _hubConnection!.start();
       setState(() {
         _isHubConnected = true;
+        _myPresenceStatus = 'Online';
       });
-      _log('SignalR Connected as User ${_activeSessionIndex} (${session.handle})');
+      _log('SignalR Connected as User (${session.handle})');
     } catch (e) {
       setState(() {
         _isHubConnected = false;
@@ -864,6 +1598,25 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         }
       }
     });
+  }
+
+  Future<void> _updateMyPresence(String statusName) async {
+    _intendedPresenceStatus = statusName;
+    if (_hubConnection == null) return;
+    try {
+      int statusIndex = 0;
+      if (statusName.toLowerCase() == 'online') statusIndex = 1;
+      else if (statusName.toLowerCase() == 'busy') statusIndex = 2;
+      
+      await _hubConnection!.invoke('UpdatePresence', args: [statusIndex]);
+      if (mounted) {
+        setState(() {
+          _myPresenceStatus = statusName;
+        });
+      }
+    } catch (e) {
+      _log('Error updating presence: $e');
+    }
   }
 
   void _startCallTimer() {
@@ -903,7 +1656,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<void> _registerUser(int sessionSlot) async {
+  Future<void> _registerUser() async {
     setState(() {
       _authErrorMessage = null;
       _authSuccessMessage = null;
@@ -943,7 +1696,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         body: jsonEncode(body),
       );
 
-      _log('Register User Slot $sessionSlot -> Status ${res.statusCode}: ${res.body}');
+      _log('Register User -> Status ${res.statusCode}: ${res.body}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -951,12 +1704,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _saveSessionToLocalStorage(session);
         _scheduleExpiryTimer(session.token);
         setState(() {
-          if (sessionSlot == 1) {
-            _user1Session = session;
-          } else {
-            _user2Session = session;
-          }
-          _activeSessionIndex = sessionSlot;
+          _currentSession = session;
           _authSuccessMessage = 'Registered and logged in as @${session.handle}!';
         });
         await _connectSignalR();
@@ -986,7 +1734,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
-  Future<void> _loginUser(int sessionSlot) async {
+  Future<void> _loginUser() async {
     setState(() {
       _authErrorMessage = null;
       _authSuccessMessage = null;
@@ -1020,7 +1768,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         body: jsonEncode(body),
       );
 
-      _log('Login Slot $sessionSlot -> Status ${res.statusCode}: ${res.body}');
+      _log('Login -> Status ${res.statusCode}: ${res.body}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -1028,12 +1776,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         _saveSessionToLocalStorage(session);
         _scheduleExpiryTimer(session.token);
         setState(() {
-          if (sessionSlot == 1) {
-            _user1Session = session;
-          } else {
-            _user2Session = session;
-          }
-          _activeSessionIndex = sessionSlot;
+          _currentSession = session;
           _authSuccessMessage = 'Logged in successfully as @${session.handle}!';
         });
         await _connectSignalR();
@@ -1222,6 +1965,140 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
+  Future<void> _fetchPresenceSettings() async {
+    final res = await _authenticatedApiCall((token) => http.get(
+      Uri.parse('$_baseUrl/api/v1/presence/settings'),
+      headers: {'Authorization': 'Bearer $token'},
+    ));
+    if (res != null && res.statusCode == 200) {
+      final body = jsonDecode(res.body);
+      if (mounted) {
+        setState(() {
+          _presenceVisibility = body['visibility'] ?? 1;
+        });
+      }
+    }
+  }
+
+  Future<void> _updatePresenceVisibility(int visibility) async {
+    final res = await _authenticatedApiCall((token) => http.put(
+      Uri.parse('$_baseUrl/api/v1/presence/settings'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'visibility': visibility}),
+    ));
+    if (res != null && (res.statusCode == 200 || res.statusCode == 204)) {
+      if (mounted) {
+        setState(() {
+          _presenceVisibility = visibility;
+        });
+      }
+    }
+  }
+
+  Future<void> _fetchPresenceExceptions() async {
+    final res = await _authenticatedApiCall((token) => http.get(
+      Uri.parse('$_baseUrl/api/v1/presence/settings/exceptions'),
+      headers: {'Authorization': 'Bearer $token'},
+    ));
+    if (res != null && res.statusCode == 200) {
+      if (mounted) {
+        setState(() {
+          _presenceExceptions = jsonDecode(res.body);
+        });
+      }
+    }
+  }
+
+  Future<void> _setPresenceException(String targetId, bool isAllowed) async {
+    final res = await _authenticatedApiCall((token) => http.post(
+      Uri.parse('$_baseUrl/api/v1/presence/settings/exceptions'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'targetUserId': targetId, 'isAllowed': isAllowed}),
+    ));
+    if (res != null && (res.statusCode == 200 || res.statusCode == 204)) {
+      await _fetchPresenceExceptions();
+    }
+  }
+
+  Future<void> _deletePresenceException(String targetId) async {
+    final res = await _authenticatedApiCall((token) => http.delete(
+      Uri.parse('$_baseUrl/api/v1/presence/settings/exceptions/$targetId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ));
+    if (res != null && (res.statusCode == 200 || res.statusCode == 204)) {
+      await _fetchPresenceExceptions();
+    }
+  }
+
+  void _showPresenceExceptionsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Custom Presence Visibility', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Manage which connections can or cannot see your presence.', style: TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+                  const SizedBox(height: 16),
+                  if (_connections.isEmpty)
+                    const Text('No connections to manage.', style: TextStyle(fontSize: 13))
+                  else
+                    Expanded(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _connections.length,
+                        itemBuilder: (context, index) {
+                          final c = _connections[index];
+                          final cId = c['contactId'] ?? c['connectedUserId'];
+                          final cHandle = c['contactUserId'] ?? c['userId'] ?? 'Contact';
+                          final existingException = _presenceExceptions.firstWhere((e) => e['targetUserId'] == cId, orElse: () => null);
+                          
+                          String currentStatus = 'Default';
+                          if (existingException != null) {
+                            currentStatus = existingException['isAllowed'] == true ? 'Allowed' : 'Denied';
+                          }
+
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(cHandle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            subtitle: Text('Status: $currentStatus', style: const TextStyle(fontSize: 12)),
+                            trailing: PopupMenuButton<String>(
+                              onSelected: (val) async {
+                                if (val == 'allow') {
+                                  await _setPresenceException(cId, true);
+                                } else if (val == 'deny') {
+                                  await _setPresenceException(cId, false);
+                                } else {
+                                  await _deletePresenceException(cId);
+                                }
+                                setDialogState(() {});
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(value: 'default', child: Text('Default')),
+                                const PopupMenuItem(value: 'allow', child: Text('Allow')),
+                                const PopupMenuItem(value: 'deny', child: Text('Deny')),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Done')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _fetchConnections() async {
     final session = currentSession;
     if (session == null) return;
@@ -1254,6 +2131,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _callerOrCalleeName = targetHandle;
       _callStatusText = 'Initiating call to $targetHandle...';
       _ringTimerSeconds = 15;
+      _micErrorCategory = null;
     });
 
     _log('Initiating call via SignalR to $targetGuidId ($targetHandle)');
@@ -1272,17 +2150,23 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (_hubConnection == null || _activeCallId == null) return;
 
     _ringTimer?.cancel();
-    _log('Responding to call $_activeCallId: accepted=$accepted');
+    if (accepted) {
+      _tsCallAccepted = DateTime.now().millisecondsSinceEpoch;
+    }
+    _log('Responding to call $_activeCallId: accepted=$accepted [ts: $_tsCallAccepted]');
     try {
       await _hubConnection!.invoke('RespondToCall', args: <Object>[_activeCallId!, accepted]);
       if (accepted) {
         setState(() {
           _isIncomingCall = false;
           _isActiveCall = true;
-          _callStatusText = 'Call Active';
+          _callStatusText = 'Connected';
           _callTimerSeconds = 0;
         });
         _startCallTimer();
+
+        _log('Accept sent. Pre-initializing WebRTC immediately.');
+        _ensureWebRTCSetup();
       } else {
         setState(() {
           _isIncomingCall = false;
@@ -1295,8 +2179,107 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     }
   }
 
+  Future<void> _triggerRecovery() async {
+    if (_isRecovering || _peerConnection == null || _activeCallId == null) {
+      return;
+    }
+
+    if (_recoveryAttempts >= _maxRecoveryAttempts) {
+      _log('Recovery attempts exhausted. Terminating call.');
+      await _endCall();
+      return;
+    }
+
+    _isRecovering = true;
+    _recoveryAttempts++;
+
+    if (mounted) {
+      setState(() {
+        _callStatusText = 'Reconnecting... (Attempt $_recoveryAttempts/$_maxRecoveryAttempts)';
+      });
+    }
+
+    _log('Initiating WebRTC recovery attempt $_recoveryAttempts... [ts: ${DateTime.now().millisecondsSinceEpoch}]');
+
+    try {
+      _tsOfferCreationStarted = DateTime.now().millisecondsSinceEpoch;
+      final offer = await _peerConnection!.createOffer({'iceRestart': true});
+      await _peerConnection!.setLocalDescription(offer);
+
+      if (_hubConnection != null) {
+        _hubConnection!.invoke('SendWebRtcOffer', args: [_activeCallId!, offer.sdp!]);
+      }
+
+      _recoveryTimer?.cancel();
+      _recoveryTimer = Timer(const Duration(seconds: _recoveryTimeoutSeconds), () {
+        _log('Recovery attempt $_recoveryAttempts timed out.');
+        _isRecovering = false;
+        _triggerRecovery();
+      });
+    } catch (e) {
+      _log('Failed to initiate recovery: $e');
+      _isRecovering = false;
+      _triggerRecovery();
+    }
+  }
+
+  Future<void> _teardownWebRTC({bool preserveCallState = false}) async {
+    _printCallSummary();
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _isRecovering = false;
+    _recoveryAttempts = 0;
+    _recoveryTimer?.cancel();
+    _disconnectGraceTimer?.cancel();
+    _log('Tearing down WebRTC...');
+
+    _webRTCSetupGeneration++; // Invalidate any pending setup
+    _webRTCSetupFuture = null; // Clear future so subsequent calls start fresh
+
+    _localStream?.getTracks().forEach((t) => t.stop());
+    _localStream = null;
+    
+    final pc = _peerConnection;
+    _peerConnection = null;
+    try {
+      await pc?.close();
+    } catch (e) {
+      _log('Error closing peer connection: $e');
+    }
+    
+    _remoteRenderer?.srcObject = null;
+
+    if (!preserveCallState) {
+      _pendingIceCandidates.clear();
+      _pendingRemoteOfferSdp = null;
+      _needsToSendOffer = false;
+      _micErrorCategory = null;
+    }
+
+    if (!preserveCallState) {
+      _tsCallAccepted = null;
+      _tsWebRTCSetupStarted = null;
+      _tsGetUserMediaStarted = null;
+      _tsLocalStreamReady = null;
+      _tsPeerConnectionCreated = null;
+      _tsLocalTrackAdded = null;
+      _tsOfferCreationStarted = null;
+      _tsOfferCreationCompleted = null;
+      _tsOfferSent = null;
+      _tsAnswerReceived = null;
+      _tsIceGatheringStarted = null;
+      _tsIceGatheringCompleted = null;
+      _tsIceConnected = null;
+      _tsRemoteTrackReceived = null;
+      _tsRemoteStreamAttached = null;
+      _tsRemotePlaybackStarted = null;
+    }
+  }
+
   Future<void> _endCall() async {
     if (_activeCallId == null) return;
+
+    await _teardownWebRTC();
 
     _callTimer?.cancel();
     _ringTimer?.cancel();
@@ -1330,7 +2313,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _isRinging = false;
       _isIncomingCall = false;
       _activeCallId = null;
-      _callStatusText = 'Call Ended';
+      _callStatusText = 'Call ended';
     });
 
     _fetchCallHistory();
@@ -1513,68 +2496,97 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     _fetchBlockedUsers();
   }
 
-  void _switchSession(int slot) async {
-    setState(() {
-      _activeSessionIndex = slot;
-    });
-    _log('Switched Active Session Slot to User $slot (${currentSession?.handle ?? 'Logged Out'})');
-    if (currentSession != null) {
-      _scheduleExpiryTimer(currentSession!.token);
-      await _connectSignalR();
-      _refreshActiveTabData();
-    } else {
-      _expiryTimer?.cancel();
-      _expiryTimer = null;
-      _hubConnection?.stop();
-      setState(() {
-        _isHubConnected = false;
-      });
-    }
-  }
-
   void _showProfilePanelModal() {
     final session = currentSession;
     if (session == null) return;
 
+    _fetchPresenceSettings();
+    _fetchPresenceExceptions();
+
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Container(
-          width: 360,
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircleAvatar(
-                radius: 44,
-                backgroundColor: const Color(0xFF0D9488),
-                child: Text(
-                  session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
-                  style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: Container(
+              width: 360,
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: CircleAvatar(
+                      radius: 44,
+                      backgroundColor: const Color(0xFF0D9488),
+                      child: Text(
+                        session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                        style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      session.handle,
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      session.email.isNotEmpty ? session.email : 'No email address',
+                      style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  const Text('Privacy Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  const Text('Show my presence to:', style: TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    value: _presenceVisibility,
+                    decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text('Everyone')),
+                      DropdownMenuItem(value: 1, child: Text('My connections')),
+                      DropdownMenuItem(value: 2, child: Text('Nobody')),
+                      DropdownMenuItem(value: 3, child: Text('Custom')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() {
+                          _presenceVisibility = val;
+                        });
+                        _updatePresenceVisibility(val);
+                      }
+                    },
+                  ),
+                  if (_presenceVisibility == 3) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                        onPressed: _showPresenceExceptionsDialog,
+                        child: const Text('Manage Exceptions'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                '@${session.handle}',
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                session.email.isNotEmpty ? session.email : 'No email address',
-                style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        }
       ),
     );
   }
@@ -1600,7 +2612,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     final cHandle = c['contactUserId'] ?? c['userId'] ?? cId;
                     return DropdownMenuItem<String>(
                       value: cId,
-                      child: Text('@$cHandle'),
+                      child: Text(cHandle),
                     );
                   }).toList(),
                   onChanged: (val) {
@@ -1656,16 +2668,17 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           child: Stack(
             children: [
               Center(child: SingleChildScrollView(child: _buildAuthCard())),
-              Positioned(
-                bottom: 16,
-                right: 16,
-                child: FloatingActionButton.small(
-                  onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
-                  backgroundColor: const Color(0xFF334155),
-                  child: const Icon(Icons.developer_mode, color: Colors.white),
+              if (!kReleaseMode)
+                Positioned(
+                  bottom: 16,
+                  right: 16,
+                  child: FloatingActionButton.small(
+                    onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
+                    backgroundColor: const Color(0xFF334155),
+                    child: const Icon(Icons.developer_mode, color: Colors.white),
+                  ),
                 ),
-              ),
-              if (_showDevConsole) _buildDevConsoleSheet(),
+              if (!kReleaseMode && _showDevConsole) _buildDevConsoleSheet(),
             ],
           ),
         ),
@@ -1682,18 +2695,35 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF0D9488),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
+                Stack(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0D9488),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        session.handle.isNotEmpty ? session.handle[0].toUpperCase() : 'U',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: (_myPresenceStatus.toLowerCase() == 'online' || _myPresenceStatus.toLowerCase() == 'busy') ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(width: 12),
                 Column(
@@ -1701,25 +2731,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '@${session.handle}',
+                      session.handle,
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: _isHubConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _isHubConnected ? 'Connected' : 'Offline',
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                        ),
-                      ],
                     ),
                   ],
                 ),
@@ -1728,15 +2741,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(
-              _showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined,
-              size: 18,
-              color: const Color(0xFF94A3B8),
+          if (!kReleaseMode)
+            IconButton(
+              icon: Icon(
+                _showDevConsole ? Icons.developer_mode : Icons.bug_report_outlined,
+                size: 18,
+                color: const Color(0xFF94A3B8),
+              ),
+              tooltip: 'Developer Tools',
+              onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
             ),
-            tooltip: 'Developer Tools',
-            onPressed: () => setState(() => _showDevConsole = !_showDevConsole),
-          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFF64748B)),
             tooltip: 'Log Out',
@@ -1752,7 +2766,10 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               if (isWide)
                 NavigationRail(
                   selectedIndex: _selectedNavIndex,
-                  onDestinationSelected: (idx) => setState(() => _selectedNavIndex = idx),
+                  onDestinationSelected: (idx) => setState(() {
+                    _selectedNavIndex = idx;
+                    _selectedHistoryContact = null;
+                  }),
                   labelType: NavigationRailLabelType.all,
                   selectedIconTheme: const IconThemeData(color: Color(0xFF0D9488)),
                   selectedLabelTextStyle: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
@@ -1819,14 +2836,19 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           if (_isIncomingCall || _isActiveCall)
             Positioned.fill(child: _buildFullCallOverlay()),
-          if (_showDevConsole) _buildDevConsoleSheet(),
+          if (!kReleaseMode && _showDevConsole) _buildDevConsoleSheet(),
+          if (_remoteRenderer != null)
+            SizedBox(width: 1, height: 1, child: RTCVideoView(_remoteRenderer!)),
         ],
       ),
       bottomNavigationBar: isWide
           ? null
           : NavigationBar(
               selectedIndex: _selectedNavIndex,
-              onDestinationSelected: (idx) => setState(() => _selectedNavIndex = idx),
+              onDestinationSelected: (idx) => setState(() {
+                _selectedNavIndex = idx;
+                _selectedHistoryContact = null;
+              }),
               indicatorColor: const Color(0xFFCCFBF1),
               destinations: [
                 const NavigationDestination(
@@ -2061,7 +3083,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _isAuthLoading ? null : () => _loginUser(_activeSessionIndex),
+              onPressed: _isAuthLoading ? null : () => _loginUser(),
               child: _isAuthLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text('Log In'),
@@ -2152,7 +3174,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _isAuthLoading ? null : () => _registerUser(_activeSessionIndex),
+              onPressed: _isAuthLoading ? null : () => _registerUser(),
               child: _isAuthLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text('Create Account'),
@@ -2224,7 +3246,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                              Text(handle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                               Text('Phone: $phone', style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
                             ],
                           ),
@@ -2367,8 +3389,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 final conn = _connections[index];
                 final targetGuidId = conn['contactId'] ?? conn['connectedUserId'];
                 final handle = conn['contactUserId'] ?? conn['userId'] ?? 'Contact';
-                final presence = conn['presenceStatus'] ?? 'Offline';
-                final isOnline = presence.toString().toLowerCase() == 'online';
+                final presence = conn['presenceStatus'];
+                final isOnline = presence?.toString().toLowerCase() == 'online';
 
                 return Card(
                   child: ListTile(
@@ -2380,26 +3402,23 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                           foregroundColor: const Color(0xFF334155),
                           child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'C'),
                         ),
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: isOnline ? const Color(0xFF10B981) : const Color(0xFFCBD5E1),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
+                        if (presence != null)
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
-                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(
-                      'Status: $presence',
-                      style: TextStyle(color: isOnline ? const Color(0xFF059669) : const Color(0xFF64748B), fontSize: 12),
-                    ),
+                    title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                     trailing: ElevatedButton.icon(
                       onPressed: () => _initiateCall(targetGuidId, handle),
                       icon: const Icon(Icons.phone, size: 16),
@@ -2486,7 +3505,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('@$senderHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      Text(senderHandle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                                       const SizedBox(height: 2),
                                       Text('Wants to connect with you', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
                                     ],
@@ -2569,7 +3588,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('@$targetHandle', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      Text(targetHandle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                                       const SizedBox(height: 2),
                                       const Text('Request sent', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
                                     ],
@@ -2649,12 +3668,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                       foregroundColor: const Color(0xFF0D9488),
                       child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'U'),
                     ),
-                    title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: const Text('Voice Call via SignalR', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                     trailing: ElevatedButton.icon(
                       onPressed: () => _initiateCall(targetGuidId, handle),
                       icon: const Icon(Icons.phone, size: 18),
-                      label: const Text('Initiate Call'),
+                      label: const Text('Call'),
                     ),
                   ),
                 );
@@ -2757,12 +3776,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 24),
           Text(
-            '@${_callerOrCalleeName ?? "Unknown"}',
+            _callerOrCalleeName ?? "Unknown",
             style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 8),
           Text(
-            _isActiveCall ? 'Call Active' : 'Incoming Voice Call...',
+            _isActiveCall ? 'Connected' : 'Incoming Voice Call...',
             style: TextStyle(fontSize: 16, color: Colors.teal.shade200),
           ),
           const SizedBox(height: 12),
@@ -2810,7 +3829,42 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
             'Audio controls inert (Sprint 7.6 audio integration)',
             style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontStyle: FontStyle.italic),
           ),
-          const SizedBox(height: 48),
+          if (_micErrorCategory != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(top: 24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF450a0a),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFdc2626)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.mic_off, color: Color(0xFFef4444), size: 32),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Microphone Access Required',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _micErrorCategory == 'noMicrophone'
+                        ? 'No microphone was found on this device.\nPlease plug in a microphone and try again.'
+                        : 'Connect needs microphone access for a voice call.\nThe browser/device microphone permission must be enabled.\nPlease enable it and try again.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFFfca5a5), fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _retryMicSetup,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry Microphone'),
+                  ),
+                ],
+              ),
+            )
+          else
+            const SizedBox(height: 48),
           if (_isIncomingCall)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -2839,7 +3893,137 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     );
   }
 
+  String _formatCallDateTime(String isoString) {
+    if (isoString.isEmpty) return '';
+    try {
+      final DateTime dt = DateTime.parse(isoString).toLocal();
+      final List<String> months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final month = months[dt.month - 1];
+      final day = dt.day;
+      final year = dt.year;
+      
+      int hour = dt.hour;
+      final minute = dt.minute.toString().padLeft(2, '0');
+      final ampm = hour >= 12 ? 'PM' : 'AM';
+      if (hour == 0) {
+        hour = 12;
+      } else if (hour > 12) {
+        hour -= 12;
+      }
+      
+      return '$month $day, $year · $hour:$minute $ampm';
+    } catch (e) {
+      return isoString;
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '0s';
+    if (seconds < 60) return '${seconds}s';
+    
+    final int hours = seconds ~/ 3600;
+    final int remainingSeconds = seconds % 3600;
+    final int minutes = remainingSeconds ~/ 60;
+    
+    if (hours > 0) {
+      if (minutes > 0) {
+        return '${hours}h ${minutes}m';
+      }
+      return '${hours}h';
+    }
+    
+    return '${minutes}m';
+  }
+
   Widget _buildCallHistoryScreen() {
+    if (_selectedHistoryContact != null) {
+      final top20 = _callHistory.take(20).toList();
+      final contactCalls = top20.where((item) {
+        final isOutgoing = item['isOutgoing'] ?? false;
+        final callerUserId = item['callerUserId'] ?? 'Unknown';
+        final calleeUserId = item['calleeUserId'] ?? 'Unknown';
+        final otherPerson = isOutgoing ? calleeUserId : callerUserId;
+        return otherPerson == _selectedHistoryContact;
+      }).toList();
+
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => setState(() => _selectedHistoryContact = null),
+                ),
+                const SizedBox(width: 8),
+                Text(_selectedHistoryContact!, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: ListView.separated(
+                itemCount: contactCalls.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final item = contactCalls[index];
+                  final status = item['status'] ?? 'Unknown';
+                  final startedAtRaw = item['startedAt'] ?? '';
+                  final startedAtFormatted = _formatCallDateTime(startedAtRaw);
+                  final bool isAccepted = status == 'Completed'; // Backend uses Completed for answered calls
+                  final int duration = item['durationSeconds'] ?? 0;
+                  
+                  String subtitleText = startedAtFormatted;
+                  if (isAccepted && duration > 0) {
+                      subtitleText += '\nDuration: ${_formatDuration(duration)}';
+                  }
+
+                  String displayStatus = 'Unknown';
+                  if (status == 'Completed') {
+                    displayStatus = 'Accepted';
+                  } else if (status == 'Rejected') {
+                    displayStatus = 'Rejected';
+                  } else if (status == 'Missed') {
+                    displayStatus = 'Missed';
+                  } else if (status == 'Failed') {
+                    displayStatus = 'Failed';
+                  }
+
+                  return Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isAccepted ? const Color(0xFFECFDF5) : const Color(0xFFFFF1F2),
+                        foregroundColor: isAccepted ? const Color(0xFF059669) : const Color(0xFFE11D48),
+                        child: Icon(
+                          isAccepted ? Icons.phone : Icons.call_missed,
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(displayStatus, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(subtitleText, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final top20 = _callHistory.take(20).toList();
+    final List<String> orderedContacts = [];
+    for (final item in top20) {
+      final isOutgoing = item['isOutgoing'] ?? false;
+      final callerUserId = item['callerUserId'] ?? 'Unknown';
+      final calleeUserId = item['calleeUserId'] ?? 'Unknown';
+      final otherPerson = isOutgoing ? calleeUserId : callerUserId;
+      if (!orderedContacts.contains(otherPerson)) {
+        orderedContacts.add(otherPerson);
+      }
+    }
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -2855,7 +4039,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           ),
           const SizedBox(height: 20),
           Expanded(
-            child: _callHistory.isEmpty
+            child: orderedContacts.isEmpty
                 ? Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(40),
@@ -2876,46 +4060,20 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     ),
                   )
                 : ListView.separated(
-                    itemCount: _callHistory.length,
+                    itemCount: orderedContacts.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final item = _callHistory[index];
-                      final isOutgoing = item['isOutgoing'] ?? false;
-                      final callerUserId = item['callerUserId'] ?? 'Unknown';
-                      final calleeUserId = item['calleeUserId'] ?? 'Unknown';
-                      final status = item['status'] ?? 'Unknown';
-                      final reason = item['missedReason'];
-                      final duration = item['durationSeconds'] ?? 0;
-                      final startedAt = item['startedAt'] ?? '';
-
-                      final otherPerson = isOutgoing ? calleeUserId : callerUserId;
-                      final bool isAccepted = status == 'Accepted';
-
+                      final contact = orderedContacts[index];
                       return Card(
                         child: ListTile(
+                          onTap: () => setState(() => _selectedHistoryContact = contact),
                           leading: CircleAvatar(
-                            backgroundColor: isAccepted
-                                ? (isOutgoing ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF))
-                                : const Color(0xFFFFF1F2),
-                            foregroundColor: isAccepted
-                                ? (isOutgoing ? const Color(0xFF059669) : const Color(0xFF2563EB))
-                                : const Color(0xFFE11D48),
-                            child: Icon(
-                              isAccepted
-                                  ? (isOutgoing ? Icons.call_made : Icons.call_received)
-                                  : Icons.call_missed,
-                              size: 20,
-                            ),
+                            backgroundColor: const Color(0xFFF0FDFA),
+                            foregroundColor: const Color(0xFF0D9488),
+                            child: Text(contact.isNotEmpty ? contact[0].toUpperCase() : 'U'),
                           ),
-                          title: Text('@$otherPerson', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(
-                            '${isOutgoing ? "Outgoing" : "Incoming"} • Status: $status ${reason != null ? "($reason)" : ""}\nTime: $startedAt',
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                          ),
-                          trailing: Text(
-                            '${duration}s',
-                            style: const TextStyle(fontFamily: 'monospace', color: Color(0xFF475569)),
-                          ),
+                          title: Text(contact, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
                         ),
                       );
                     },
@@ -2988,7 +4146,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                               foregroundColor: const Color(0xFFE11D48),
                               child: Text(handle.isNotEmpty ? handle[0].toUpperCase() : 'B'),
                             ),
-                            title: Text('@$handle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                             trailing: OutlinedButton(
                               onPressed: () => _unblockUser(id),
                               child: const Text('Unblock'),
@@ -3028,8 +4186,8 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Text('User Handle: ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-                      Text('@${session?.handle ?? "Unknown"}', style: const TextStyle(color: Color(0xFF0F172A))),
+                      const Text('User ID: ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                      Text(session?.handle ?? "Unknown", style: const TextStyle(color: Color(0xFF0F172A))),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -3161,14 +4319,28 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                         ),
                       ],
                     ),
-                    OutlinedButton.icon(
-                      onPressed: _connectSignalR,
-                      icon: const Icon(Icons.sync, size: 14, color: Colors.white70),
-                      label: const Text('Reconnect SignalR', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        side: const BorderSide(color: Color(0xFF475569)),
-                      ),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _testMicCapture,
+                          icon: const Icon(Icons.mic, size: 14, color: Color(0xFF4ADE80)),
+                          label: const Text('Test Mic', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            side: const BorderSide(color: Color(0xFF0D9488)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _connectSignalR,
+                          icon: const Icon(Icons.sync, size: 14, color: Colors.white70),
+                          label: const Text('Reconnect SignalR', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            side: const BorderSide(color: Color(0xFF475569)),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -3182,47 +4354,27 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF334155)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline, color: Color(0xFF38BDF8), size: 18),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Dual User Slot Switcher (Dev Harness Convenience)',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                  ),
-                ),
-                ChoiceChip(
-                  label: Text('User 1 (${_user1Session?.handle ?? "Empty"})'),
-                  selected: _activeSessionIndex == 1,
-                  onSelected: (_) => _switchSession(1),
-                ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: Text('User 2 (${_user2Session?.handle ?? "Empty"})'),
-                  selected: _activeSessionIndex == 2,
-                  onSelected: (_) => _switchSession(2),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Console Audit Trail:', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              TextButton(
-                onPressed: () => setState(() => _consoleLogs.clear()),
-                child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
-              ),
+              if (!kReleaseMode)
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: _downloadLogs,
+                      child: const Text('Download Logs', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 11)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                         DiagnosticLogger().clearSession();
+                         setState((){});
+                      },
+                      child: const Text('Clear Logs', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                    ),
+                  ],
+                ),
             ],
           ),
           Expanded(
@@ -3234,10 +4386,12 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 border: Border.all(color: const Color(0xFF1E293B)),
               ),
               child: ListView.builder(
-                itemCount: _consoleLogs.length,
+                itemCount: DiagnosticLogger().getLogs().length,
                 itemBuilder: (context, index) {
+                  final logEvents = DiagnosticLogger().getLogs().reversed.toList();
+                  final log = logEvents[index];
                   return SelectableText(
-                    _consoleLogs[index],
+                    '[${log.timestamp}] ${log.message}',
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFF4ADE80)),
                   );
                 },

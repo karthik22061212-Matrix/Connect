@@ -43,7 +43,7 @@ public class CorsAndSwaggerSecurityTests : IClassFixture<CustomWebApplicationFac
     {
         // Arrange
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/health");
-        request.Headers.Add("Origin", "http://localhost:5200");
+        request.Headers.Add("Origin", "http://localhost:8080");
 
         // Act
         var response = await _client.SendAsync(request);
@@ -52,7 +52,7 @@ public class CorsAndSwaggerSecurityTests : IClassFixture<CustomWebApplicationFac
         Assert.True(
             response.Headers.Contains("Access-Control-Allow-Origin"),
             "Allowed origin should receive Access-Control-Allow-Origin header.");
-        Assert.Equal("http://localhost:5200", response.Headers.GetValues("Access-Control-Allow-Origin").FirstOrDefault());
+        Assert.Equal("http://localhost:8080", response.Headers.GetValues("Access-Control-Allow-Origin").FirstOrDefault());
         Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").FirstOrDefault());
     }
 
@@ -61,7 +61,7 @@ public class CorsAndSwaggerSecurityTests : IClassFixture<CustomWebApplicationFac
     {
         // Arrange
         var request = new HttpRequestMessage(HttpMethod.Post, "/hubs/call/negotiate?negotiateVersion=1");
-        request.Headers.Add("Origin", "http://localhost:5200");
+        request.Headers.Add("Origin", "http://localhost:8080");
 
         // Act
         var response = await _client.SendAsync(request);
@@ -70,7 +70,7 @@ public class CorsAndSwaggerSecurityTests : IClassFixture<CustomWebApplicationFac
         Assert.True(
             response.Headers.Contains("Access-Control-Allow-Origin"),
             "SignalR negotiate request from allowed origin should receive Access-Control-Allow-Origin header.");
-        Assert.Equal("http://localhost:5200", response.Headers.GetValues("Access-Control-Allow-Origin").FirstOrDefault());
+        Assert.Equal("http://localhost:8080", response.Headers.GetValues("Access-Control-Allow-Origin").FirstOrDefault());
         Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").FirstOrDefault());
     }
 

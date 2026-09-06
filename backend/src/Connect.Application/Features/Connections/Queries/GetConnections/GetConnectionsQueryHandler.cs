@@ -8,13 +8,16 @@ public class GetConnectionsQueryHandler : IRequestHandler<GetConnectionsQuery, I
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IPresenceVisibilityService _presenceVisibilityService;
 
     public GetConnectionsQueryHandler(
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IPresenceVisibilityService presenceVisibilityService)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _presenceVisibilityService = presenceVisibilityService;
     }
 
     public async Task<IEnumerable<ConnectionDto>> Handle(GetConnectionsQuery request, CancellationToken cancellationToken)
@@ -46,13 +49,15 @@ public class GetConnectionsQueryHandler : IRequestHandler<GetConnectionsQuery, I
 
             if (contact != null && !contact.IsDeleted)
             {
+                var canView = await _presenceVisibilityService.CanViewPresenceAsync(contact.Id, currentUserId, cancellationToken);
+                
                 dtos.Add(new ConnectionDto(
                     conn.Id,
                     contact.Id,
                     contact.UserId,
                     contact.Email,
                     contact.PhoneNumber,
-                    contact.PresenceStatus,
+                    canView ? contact.PresenceStatus : null,
                     conn.CreatedAt
                 ));
             }

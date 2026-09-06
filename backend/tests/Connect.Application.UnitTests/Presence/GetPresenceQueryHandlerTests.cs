@@ -12,8 +12,9 @@ public class GetPresenceQueryHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<IRepository<User>> _userRepoMock = new();
     private readonly Mock<IRepository<Connection>> _connectionRepoMock = new();
-    private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
-    private readonly Mock<IPresenceTracker> _presenceTrackerMock = new();
+    private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+    private readonly Mock<IPresenceTracker> _presenceTrackerMock;
+    private readonly Mock<IPresenceVisibilityService> _presenceVisibilityServiceMock;
     private readonly GetPresenceQueryHandler _handler;
     private readonly Guid _currentUserId = Guid.NewGuid();
 
@@ -21,12 +22,16 @@ public class GetPresenceQueryHandlerTests
     {
         _unitOfWorkMock.Setup(u => u.Users).Returns(_userRepoMock.Object);
         _unitOfWorkMock.Setup(u => u.Connections).Returns(_connectionRepoMock.Object);
+        _presenceTrackerMock = new Mock<IPresenceTracker>();
+        _currentUserServiceMock = new Mock<ICurrentUserService>();
+        _presenceVisibilityServiceMock = new Mock<IPresenceVisibilityService>();
         _currentUserServiceMock.Setup(c => c.UserId).Returns(_currentUserId);
 
         _handler = new GetPresenceQueryHandler(
             _unitOfWorkMock.Object,
             _presenceTrackerMock.Object,
-            _currentUserServiceMock.Object);
+            _currentUserServiceMock.Object,
+            _presenceVisibilityServiceMock.Object);
     }
 
     [Fact]
@@ -62,8 +67,8 @@ public class GetPresenceQueryHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(targetId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetUser);
 
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Connection>());
+        _presenceVisibilityServiceMock.Setup(p => p.CanViewPresenceAsync(targetId, _currentUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         var query = new GetPresenceQuery(targetId);
 
@@ -99,16 +104,8 @@ public class GetPresenceQueryHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(targetId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetUser);
 
-        var minId = _currentUserId.CompareTo(targetId) < 0 ? _currentUserId : targetId;
-        var maxId = _currentUserId.CompareTo(targetId) < 0 ? targetId : _currentUserId;
-
-        var connections = new List<Connection>
-        {
-            new Connection { UserAId = minId, UserBId = maxId }
-        };
-
-        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(connections);
+        _presenceVisibilityServiceMock.Setup(p => p.CanViewPresenceAsync(targetId, _currentUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         _presenceTrackerMock.Setup(p => p.GetUserPresenceAsync(targetId))
             .ReturnsAsync(PresenceStatus.Busy);

@@ -218,6 +218,37 @@ namespace Connect.Infrastructure.Persistence.Migrations
                     b.ToTable("DeviceTokens");
                 });
 
+            modelBuilder.Entity("Connect.Domain.Entities.PresenceVisibilityException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsAllowed")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TargetUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TargetUserId");
+
+                    b.HasIndex("OwnerUserId", "TargetUserId")
+                        .IsUnique();
+
+                    b.ToTable("PresenceVisibilityExceptions");
+                });
+
             modelBuilder.Entity("Connect.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -354,6 +385,32 @@ namespace Connect.Infrastructure.Persistence.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("Connect.Domain.Entities.UserPresenceSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("PresenceVisibility")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserPresenceSettings");
+                });
+
             modelBuilder.Entity("Connect.Domain.Entities.Block", b =>
                 {
                     b.HasOne("Connect.Domain.Entities.User", "BlockedUser")
@@ -449,6 +506,25 @@ namespace Connect.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Connect.Domain.Entities.PresenceVisibilityException", b =>
+                {
+                    b.HasOne("Connect.Domain.Entities.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Connect.Domain.Entities.User", "TargetUser")
+                        .WithMany()
+                        .HasForeignKey("TargetUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OwnerUser");
+
+                    b.Navigation("TargetUser");
+                });
+
             modelBuilder.Entity("Connect.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("Connect.Domain.Entities.User", "User")
@@ -477,6 +553,17 @@ namespace Connect.Infrastructure.Persistence.Migrations
                     b.Navigation("ReportedUser");
 
                     b.Navigation("ReporterUser");
+                });
+
+            modelBuilder.Entity("Connect.Domain.Entities.UserPresenceSetting", b =>
+                {
+                    b.HasOne("Connect.Domain.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("Connect.Domain.Entities.UserPresenceSetting", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Connect.Domain.Entities.Connection", b =>

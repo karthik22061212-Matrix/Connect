@@ -1,6 +1,8 @@
 using System.Text;
 using Connect.Application.Common.Interfaces;
 using Connect.Infrastructure.Identity;
+using Connect.Application.Common.Diagnostics;
+using Connect.Infrastructure.Diagnostics;
 using Connect.Infrastructure.Persistence;
 using Connect.Infrastructure.Persistence.Repositories;
 using Connect.Infrastructure.Services;
@@ -27,7 +29,7 @@ public static class DependencyInjection
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            connectionString = "Server=(localdb)\\mssqllocaldb;Database=ConnectDb;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True";
+            throw new InvalidOperationException("Database connection string 'DefaultConnection' not found.");
         }
 
         services.AddDbContext<ApplicationDbContext>(options =>
@@ -41,12 +43,14 @@ public static class DependencyInjection
         services.AddSingleton<IPresenceTracker, Realtime.PresenceTracker>();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddSingleton<IDiagnosticLogService, InMemoryDiagnosticLogService>();
 
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IPushNotificationService, Notifications.FcmPushNotificationService>();
         services.AddScoped<ICallTimeoutProcessor, CallTimeoutProcessor>();
+        services.AddScoped<IPresenceVisibilityService, PresenceVisibilityService>();
 
         services.AddHostedService<CallHistoryPurgeBackgroundService>();
         services.AddHostedService<ExpiredAccountsPurgeBackgroundService>();
@@ -59,6 +63,12 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.AddOptions<Connect.Infrastructure.Configuration.TurnSettings>()
+            .Bind(configuration.GetSection(Connect.Infrastructure.Configuration.TurnSettings.SectionName))
+            .ValidateOnStart();
+
+        services.AddScoped<ITurnCredentialService, TurnCredentialService>();
 
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<IOptions<JwtSettings>>((options, jwtSettingsOptions) =>
@@ -76,19 +86,6 @@ public static class DependencyInjection
                     ClockSkew = TimeSpan.Zero
                 };
 
-                options.Events = new JwtBearerEvents
-                {
-                    OnMessageReceived = context =>
-                    {
-                        var accessToken = context.Request.Query["access_token"];
-                        var path = context.HttpContext.Request.Path;
-                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/call"))
-                        {
-                            context.Token = accessToken;
-                        }
-                        return Task.CompletedTask;
-                    }
-                };
             });
 
         services.AddAuthentication(defaultScheme: JwtBearerDefaults.AuthenticationScheme)

@@ -1,51 +1,48 @@
 # 00 - Prerequisites & Setup: Connect
 
-**Azure subscription is now active.** Sprint 0 through Sprint 7.4 ran on the local dev stack (see `04-sprint-plan.md`). Sprint 7.5 (Azure Migration) can now begin.
+**Updated:** 2026-09-03  
+**Current branch:** `sprint-7.6/flutter-webrtc-dependency`  
+**Latest implementation commit:** `3583bfa`
 
----
+## Current stack
+- Flutter Web frontend
+- ASP.NET Core Web API (.NET 8)
+- SignalR for realtime signaling
+- WebRTC (`flutter_webrtc`) for browser voice media
+- SQL Server/Azure SQL with EF Core
+- Azure App Service backend
+- Azure Static Web App frontend
+- Azure VM running coturn for TURN
 
-## Step 1: Create an Azure Account — ✅ DONE
-1. Account created with `karthik22061212@gmail.com`.
-2. Subscription confirmed **active** in Azure Portal.
-3. **Subscription ID:** `787de81a-4d56-4048-b30a-2414c153e3e1`
-4. **Tenant:** Default Directory (`karthik22061212gmail.onmicrosoft.com`), Tenant ID `25c36799-0594-4ac4-9794-82914cbda4fb`
-5. Note: this tenant had "Security Defaults" enabled by default, which blocked `az login` until disabled via Microsoft Entra ID → Properties → Manage Security Defaults. Also required personal-account two-step verification setup via https://account.microsoft.com/security before login would succeed.
+## Local development
+```text
+Flutter Web: flutter run -d chrome --web-port=8080
+```
 
-## Step 2: Create a Firebase Project (for push notifications) — ✅ DONE
-Completed during Sprint 6 (push notification implementation).
+The Flutter API base URL is configuration-driven through `API_BASE_URL`. Production API URLs must not be hardcoded in application source.
 
-## Step 3: Create a Git Repository — ✅ DONE
-Repo: `https://github.com/karthik22061212-Matrix/Connect.git`, local path `C:\Projects\Connect`.
+## Azure resources currently provisioned
+- Resource group: `connect-rg`
+- API App Service: `connect-api-5633`
+- Static Web App: `connect-web-5633`
+- Azure SQL server/database: `connect-sql-5633` / `connect-db`
+- TURN VM: `connect-turn-vm`
+- TURN public IP: `52.172.234.96`
 
-## Step 4: Install Local Tooling — ✅ DONE
-- [x] **Azure CLI** — installed via WinGet (`winget install --id Microsoft.AzureCLI -e`), version 2.89.1, authenticated via `az login --use-device-code`
-- [x] **.NET 8 SDK**
-- [x] **Flutter SDK**
-- [x] **Git**
+Production secrets are configuration-managed and must not be committed.
 
-## Step 5: Provision Azure Resources (Sprint 7.5 — now active)
-With the subscription confirmed active and Azure CLI authenticated, resource provisioning proceeds via Azure CLI script, to be generated and reviewed before execution. Will provision:
-- Resource Group
-- Azure App Service (Linux, F1 Free tier)
-- Azure SQL Database (Free tier)
-- Azure Static Web App (Free tier)
-- Azure B1s VM (for coturn TURN server)
+## WebRTC prerequisites
+The frontend now:
+- requests microphone access;
+- applies echo cancellation, noise suppression, and auto gain control;
+- obtains short-lived TURN credentials from `GET /api/v1/turn/credentials`;
+- configures STUN + TURN;
+- creates and manages `RTCPeerConnection`;
+- exchanges offer/answer/ICE through SignalR.
 
-## Step 6: Running & Building Flutter Web App
-- **Local Dev**: `flutter run -d chrome --web-port=8080` (no `--dart-define` needed; defaults to `http://localhost:5200`; port 8080 matches an allowed CORS origin)
-- **Azure/Prod Build**: `flutter build web --dart-define=API_BASE_URL=https://connect-api-5633.azurewebsites.net`
-
----
-
-## Readiness Checklist (Sprint 0 — coding) — ✅ ALL COMPLETE
-- [x] Firebase project created
-- [x] Git repository created
-- [x] Local tooling installed (.NET 8 SDK, Flutter SDK, Git, Azure CLI)
-- [x] Planning docs (`00`–`08`) committed to repo
-- [x] Local DB confirmed: **SQL Server LocalDB** (Windows dev environment)
-
-## Readiness Checklist (Sprint 7.5 — Azure migration) — ✅ ALL COMPLETE
-- [x] Azure account created, subscription active (`787de81a-4d56-4048-b30a-2414c153e3e1`)
-- [x] Azure CLI installed and authenticated (`az account show` confirms active subscription)
-
-**Sprint 7.5 can begin.**
+## Current verification state
+Implementation is complete for the current P0 WebRTC work. Live verification is still pending for:
+- cross-network Wi-Fi/mobile calling;
+- TURN relay selection;
+- real network-change recovery;
+- full manual regression.
