@@ -10,6 +10,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:DefaultConnection", "DataSource=:memory:");
+        builder.UseSetting("AllowedOrigins:0", "http://localhost:8080");
     }
 }
 
