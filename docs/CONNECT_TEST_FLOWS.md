@@ -74,7 +74,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### A6 — Login with wrong password
 **Steps:** On the login screen, enter `testuser1@connect.local` with a deliberately wrong password, submit. Check the Network tab for the actual request field names and response.
 **Expected:** Clear "invalid credentials" message shown in the UI (not a stack trace or blank failure). Check actual HTTP status returned (expect 400 or 401 depending on how `LoginCommand` validates — confirm which).
-**Status:** Not Run (previous attempt used wrong field name, no valid result)
+**Actual:** A clear red error callout banner appeared inline above the Email field with the exact text: `Email and password don't match.` No generic error or blank failure occurred.
+**Status:** Passed
 
 ### A7 — Silent token refresh
 **Steps:** Stay logged in past the access token's expiry window (default access token lifetime — check `RefreshTokenService`/JWT settings for exact minutes; or temporarily shorten it in `appsettings.Development.json` for faster testing). Perform any authenticated action afterward (e.g. refresh call history).
