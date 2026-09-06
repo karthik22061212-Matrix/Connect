@@ -80,7 +80,7 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### A7 — Silent token refresh
 **Steps:** Stay logged in past the access token's expiry window (default access token lifetime — check `RefreshTokenService`/JWT settings for exact minutes; or temporarily shorten it in `appsettings.Development.json` for faster testing). Perform any authenticated action afterward (e.g. refresh call history).
 **Expected:** No forced logout. Debug log panel shows `"Silent refresh successful..."` and the action completes normally.
-**Actual:** Logged in and waited 75 seconds (access token expiry is 1 min). Navigated through tabs (Calls, Requests, Contacts) and successfully searched for `testuser2`. The session remained fully active and authenticated with no redirect to login.
+**Actual:** Logged in and waited 75 seconds (access token expiry is 1 min). Navigated through tabs (Calls, Requests, Contacts) and successfully searched for `testuser2`. The session remained fully active and authenticated with no redirect to login. Confirmed via Network tab: browser fired a real POST to /api/v1/auth/refresh with a valid refreshToken payload during the wait, proving silent refresh actually triggered (not just coincidental session survival).
 **Status:** Passed
 
 ### A8 — Presence indicator shows green immediately after login
