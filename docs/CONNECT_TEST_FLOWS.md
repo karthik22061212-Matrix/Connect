@@ -86,8 +86,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### A8 — Presence indicator shows green immediately after login
 **Steps:** Log in (or register) as a fresh or existing user. Immediately check the profile presence indicator color, without waiting or performing any other action.
 **Expected:** Indicator shows green immediately after landing on the dashboard — not red, not requiring a delay or refresh.
-**Actual:** Verified live in browser. The indicator is RED immediately upon landing on the dashboard, and turns GREEN after approximately 2 seconds. The synchronous fix is not fully working as expected (there is still an initial delay showing red).
-**Status:** Failed
+**Actual:** Verified live in browser using both a new registration flow and standard login. The presence indicator dot shows solid green immediately upon landing on the dashboard. There is no red flash and no manual refresh required.
+**Status:** Passed
 
 ---
 
