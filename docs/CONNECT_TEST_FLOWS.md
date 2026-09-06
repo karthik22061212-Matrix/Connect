@@ -4,6 +4,17 @@
 
 **Status values:** `Not Run` | `Passed` | `Failed` | `Blocked` (can't be tested — dependency missing) | `UI Incomplete` (no UI exists for this yet, backend-only)
 
+## Execution Protocol (read this every time before running a test)
+When told "pick next test and verify":
+1. Find the first test case with Status "Not Run", top to bottom. Skip anything already Passed/Failed/Blocked.
+2. Execute ONLY that one test case via actual browser interaction at [http://localhost:8080](http://localhost:8080). No API-only shortcuts, no code reading to infer behavior — a real click-through using the browser subagent.
+3. Reuse existing test data already recorded in this file (accounts, IDs, etc.) — do not create new throwaway data unless that specific test case explicitly requires fresh data (e.g. registration tests).
+4. Update that test case's Status directly in this file: Passed, Failed, or Blocked.
+5. Add or update an "Actual:" line under the Expected line with exactly what happened — real response bodies/status codes where relevant, what appeared on screen, and any new data created (so later tests can reuse it).
+6. If it Failed, do not attempt to fix the underlying code — just record the failure accurately.
+7. Commit with message "test: execute [TEST-ID] — [Passed/Failed]" and push to main.
+8. Stop after this one test. Report back which test ran, what was done, what was observed, and the status set. Do not proceed to the next test until told to.
+
 ---
 
 ## 0. How to Run Locally
