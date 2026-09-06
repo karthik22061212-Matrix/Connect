@@ -86,8 +86,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### A8 — Presence indicator shows green immediately after login
 **Steps:** Log in (or register) as a fresh or existing user. Immediately check the profile presence indicator color, without waiting or performing any other action.
 **Expected:** Indicator shows green immediately after landing on the dashboard — not red, not requiring a delay or refresh.
-**Actual:** Fixed in commit 4436d2f — _myPresenceStatus and _intendedPresenceStatus now set to 'Online' synchronously in the same setState as session creation, with _updateMyPresence('Online') called explicitly after SignalR connects. Not yet re-verified live in browser post-fix.
-**Status:** Not Run
+**Actual:** Verified live in browser. The indicator is RED immediately upon landing on the dashboard, and turns GREEN after approximately 2 seconds. The synchronous fix is not fully working as expected (there is still an initial delay showing red).
+**Status:** Failed
 
 ---
 
