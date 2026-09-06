@@ -74,7 +74,7 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### A6 — Login with wrong password
 **Steps:** On the login screen, enter `testuser1@connect.local` with a deliberately wrong password, submit. Check the Network tab for the actual request field names and response.
 **Expected:** Clear "invalid credentials" message shown in the UI (not a stack trace or blank failure). Check actual HTTP status returned (expect 400 or 401 depending on how `LoginCommand` validates — confirm which).
-**Actual:** A clear red error callout banner appeared inline above the Email field with the exact text: `Email and password don't match.` No generic error or blank failure occurred.
+**Actual:** A clear red error callout banner appeared inline above the Email field with the exact text: `Email and password don't match.` No generic error or blank failure occurred. Backend returned HTTP 401 with body: {"title":"Unauthorized","status":401,"detail":"Invalid email/user ID or password.","instance":"/api/v1/auth/login"}.
 **Status:** Passed
 
 ### A7 — Silent token refresh
