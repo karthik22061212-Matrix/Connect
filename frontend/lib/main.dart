@@ -328,6 +328,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
   List<dynamic> _presenceExceptions = [];
   String _myPresenceStatus = 'Offline';
   String _intendedPresenceStatus = 'Online';
+  bool _hasEverConnected = false;
   List<dynamic> _callHistory = [];
 
   final FocusNode _loginEmailFocusNode = FocusNode();
@@ -1295,7 +1296,9 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
           _isIncomingCall = false;
           _isActiveCall = false;
           _activeCallId = null;
-          _myPresenceStatus = 'Offline';
+          if (_hasEverConnected) {
+            _myPresenceStatus = 'Offline';
+          }
         });
       }
     });
@@ -1305,13 +1308,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       if (mounted) {
         setState(() {
           _isHubConnected = false;
-          _myPresenceStatus = 'Offline';
+          if (_hasEverConnected) {
+            _myPresenceStatus = 'Offline';
+          }
         });
       }
     });
 
     _hubConnection!.onreconnected(({connectionId}) {
       _log('SignalR Reconnected -> $connectionId');
+      _hasEverConnected = true;
       _updateMyPresence(_intendedPresenceStatus);
       if (mounted) {
         setState(() {
@@ -1568,6 +1574,7 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
 
     try {
       await _hubConnection!.start();
+      _hasEverConnected = true;
       setState(() {
         _isHubConnected = true;
         _myPresenceStatus = 'Online';
