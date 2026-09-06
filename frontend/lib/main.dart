@@ -1706,8 +1706,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         setState(() {
           _currentSession = session;
           _authSuccessMessage = 'Registered and logged in as @${session.handle}!';
+          _myPresenceStatus = 'Online';
+          _intendedPresenceStatus = 'Online';
         });
         await _connectSignalR();
+        _updateMyPresence('Online');
         _refreshActiveTabData();
       } else {
         String msg = 'Registration failed. Please try again.';
@@ -1778,8 +1781,11 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         setState(() {
           _currentSession = session;
           _authSuccessMessage = 'Logged in successfully as @${session.handle}!';
+          _myPresenceStatus = 'Online';
+          _intendedPresenceStatus = 'Online';
         });
         await _connectSignalR();
+        _updateMyPresence('Online');
         _refreshActiveTabData();
       } else {
         final input = _loginEmailController.text.trim();
