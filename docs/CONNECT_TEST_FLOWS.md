@@ -70,6 +70,12 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 **Expected:** No forced logout. Debug log panel shows `"Silent refresh successful..."` and the action completes normally.
 **Status:** Not Run (code confirmed present: `_scheduleExpiryTimer`, `scheduleWithCap`, `_attemptSilentRefresh` all exist in `main.dart` — actual live behavior not yet observed end-to-end in this round)
 
+### A8 — Presence indicator shows green immediately after login
+**Steps:** Log in (or register) as a fresh or existing user. Immediately check the profile presence indicator color, without waiting or performing any other action.
+**Expected:** Indicator shows green immediately after landing on the dashboard — not red, not requiring a delay or refresh.
+**Actual:** Fixed in commit 4436d2f — _myPresenceStatus and _intendedPresenceStatus now set to 'Online' synchronously in the same setState as session creation, with _updateMyPresence('Online') called explicitly after SignalR connects. Not yet re-verified live in browser post-fix.
+**Status:** Not Run
+
 ---
 
 ## 2. CONNECTIONS
