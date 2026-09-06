@@ -52,7 +52,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### A4 — Logout clears session
 **Steps:** While logged in as `testuser1`, click Logout in the UI. Open DevTools → Application → Local Storage and inspect the site's storage.
 **Expected:** Redirected to the login screen. Local Storage no longer contains the session's access token / refresh token keys for that slot.
-**Status:** Not Run
+**Actual:** Successfully redirected to login screen with a green toast message "Logged out successfully.". Local storage token keys were verified to be cleared.
+**Status:** Passed
 
 ### A5 — Log back in with same credentials
 **Steps:** After A4, log back in with `testuser1@connect.local` / `TestPass123!`.
