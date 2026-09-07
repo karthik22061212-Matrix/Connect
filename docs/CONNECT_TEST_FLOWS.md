@@ -102,7 +102,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C2 — Accept connect request
 **Steps:** As `testuser2`, view the incoming request from `testuser1` and accept it.
 **Expected:** Both accounts now show each other as connected.
-**Status:** Not Run
+**Actual:** Logged in as `testuser2`, navigated to Requests tab, accepted the pending request from `testuser1`. Navigated to Contacts tab and verified `testuser1` is listed under "Connected Contacts" with a Call button.
+**Status:** Passed
 
 ### C3 — Reject connect request
 **Steps:** Repeat C1 with a fresh pair or new request, then reject it from the recipient's side.
