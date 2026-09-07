@@ -22,5 +22,6 @@ public interface ICallHubClient
     Task ConnectRequestReceived(Guid requestId, Guid fromUserId, string fromUserHandle);
     Task ConnectRequestAccepted(Guid requestId, Guid contactId, string contactUserId);
     Task ConnectRequestDeclined(Guid requestId, Guid decliningUserId);
+    Task ConnectionRemoved(Guid targetUserId);
 }
 

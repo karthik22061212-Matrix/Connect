@@ -1494,6 +1494,18 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       }
     });
 
+    _hubConnection!.on('ConnectionRemoved', (args) {
+      _log('SignalR Event: ConnectionRemoved -> $args');
+      if (args != null && args.isNotEmpty) {
+        final removedUserId = args[0].toString();
+        setState(() {
+          _connections.removeWhere((c) => 
+            (c['contactId'] ?? c['connectedUserId']) == removedUserId || 
+            (c['contactUserId'] ?? c['userId']) == removedUserId);
+        });
+      }
+    });
+
     _hubConnection!.on('ReceiveWebRtcOffer', (args) async {
       _log('SignalR Event: ReceiveWebRtcOffer -> $args');
       if (args != null && args.length >= 2) {
@@ -2134,6 +2146,65 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     } catch (e) {
       _log('Fetch Connections Exception: $e');
     }
+  }
+
+  Future<void> _disconnectConnection(String targetGuidId) async {
+    final session = currentSession;
+    if (session == null) return;
+
+    try {
+      final res = await _authenticatedApiCall((token) => http.delete(
+        Uri.parse('$_baseUrl/api/v1/connections/$targetGuidId'),
+        headers: {'Authorization': 'Bearer $token'},
+      ));
+      if (res == null) return;
+
+      _log('Disconnect Connection $targetGuidId -> Status ${res.statusCode}');
+      if (res.statusCode == 200 || res.statusCode == 204) {
+        setState(() {
+          _connections.removeWhere((c) => 
+            (c['contactId'] ?? c['connectedUserId']) == targetGuidId || 
+            (c['contactUserId'] ?? c['userId']) == targetGuidId);
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Connection removed.'), behavior: SnackBarBehavior.floating),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to remove connection: ${res.body}'), backgroundColor: const Color(0xFFE11D48), behavior: SnackBarBehavior.floating),
+          );
+        }
+      }
+    } catch (e) {
+      _log('Disconnect Connection Exception: $e');
+    }
+  }
+
+  void _showDisconnectConfirmation(String targetGuidId, String handle) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Connection', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to remove $handle from your connections? You will no longer be able to call each other.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _disconnectConnection(targetGuidId);
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _initiateCall(String targetGuidId, String targetHandle) async {
@@ -3683,10 +3754,21 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                     ),
                     title: Text(handle, style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: const Text('Voice Call via SignalR', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                    trailing: ElevatedButton.icon(
-                      onPressed: () => _initiateCall(targetGuidId, handle),
-                      icon: const Icon(Icons.phone, size: 18),
-                      label: const Text('Call'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Remove Connection',
+                          icon: const Icon(Icons.person_remove, color: Color(0xFFEF4444)),
+                          onPressed: () => _showDisconnectConfirmation(targetGuidId, handle),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: () => _initiateCall(targetGuidId, handle),
+                          icon: const Icon(Icons.phone, size: 18),
+                          label: const Text('Call'),
+                        ),
+                      ],
                     ),
                   ),
                 );

@@ -143,7 +143,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C5 — Disconnect an existing connection
 **Steps:** Attempt to remove/disconnect an existing connection from either account.
 **Expected:** Connection is removed for both users.
-**Status:** ❌ **FAILED — genuine gap.** `ConnectionsController` only has `GET /api/v1/connections`. There is no `DELETE` endpoint or `DeleteConnectionCommand` anywhere in the codebase. **This feature does not exist yet and needs to be built.**
+**Actual:** Logged in as `testuser1`, verified `testuser2` was in the "Connected Contacts" list. Clicked the "Remove Connection" icon next to `testuser2`. A confirmation dialog titled "Remove Connection" appeared. Clicked the red "Remove" button. `testuser2` was instantly removed from the list, displaying the "No connected contacts yet" empty state, with a green success snackbar "Connection removed." Logged out of `testuser1` and logged in as `testuser2`. Checked the Contacts tab and verified `testuser1` was also removed from `testuser2`'s connections.
+**Status:** Passed
 
 ### C6 — View connections list
 **Steps:** View your connections list after C2.
