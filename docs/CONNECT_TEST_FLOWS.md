@@ -96,7 +96,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C1 — Send connect request
 **Steps:** As `testuser1`, send a connect request to `testuser2`.
 **Expected:** Request appears as "pending" in `testuser1`'s sent list.
-**Status:** Not Run (backend logic confirmed via code: `SendConnectRequestCommandHandler`)
+**Actual:** Logged in as `testuser1`, searched for `testuser2`, and clicked "Send Request". Navigated to the "Requests" tab and verified `testuser2` appears under "Sent Requests" with a "Pending" badge.
+**Status:** Passed
 
 ### C2 — Accept connect request
 **Steps:** As `testuser2`, view the incoming request from `testuser1` and accept it.
