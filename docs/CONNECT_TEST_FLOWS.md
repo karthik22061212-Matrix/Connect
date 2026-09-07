@@ -136,7 +136,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C4 — Duplicate connect request blocked
 **Steps:** Send a connect request to someone you already have a pending request with.
 **Expected:** Blocked with a clear error, not duplicated. Backend throws `ConflictException("A pending connect request already exists.")`.
-**Status:** Not Run (backend logic confirmed via code review)
+**Actual:** Logged in as `testuser1`, searched for `testuser3` in Contacts, and clicked "+ Send Request". The button immediately changed to a greyed-out, disabled "Request Sent" state. Re-searching for `testuser3` maintained the disabled "Request Sent" button. The UI successfully prevents sending a duplicate request by disabling the button entirely, so no backend error is even needed or shown.
+**Status:** Passed
 
 ### C5 — Disconnect an existing connection
 **Steps:** Attempt to remove/disconnect an existing connection from either account.
