@@ -147,7 +147,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C6 — View connections list
 **Steps:** View your connections list after C2.
 **Expected:** Shows all currently connected users accurately.
-**Status:** Not Run
+**Actual:** Logged in as `testuser1` and navigated to the Contacts tab. Under "Connected Contacts", `testuser2` is correctly listed with their avatar, a red presence dot, and a green "Call" button.
+**Status:** Passed
 
 ### C7 — Connections list empty state
 **Steps:** View the connections list on a brand-new account with zero connections.
