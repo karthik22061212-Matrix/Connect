@@ -108,7 +108,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C3 — Reject connect request
 **Steps:** Repeat C1 with a fresh pair or new request, then reject it from the recipient's side.
 **Expected:** Request disappears from both sides, no lingering pending state.
-**Status:** Not Run (backend logic confirmed: `DeclineConnectRequestCommandHandler` sets `Status = Declined`, filtered out of pending list)
+**Actual:** Registered new user `testuser3`. `testuser3` sent a request to `testuser1`. `testuser1` received the request and clicked Decline. The request immediately disappeared from `testuser1`'s Received Requests. Upon `testuser3` logging back in and loading the page, the request was no longer in their Sent Requests list.
+**Status:** Passed
 
 ### C4 — Duplicate connect request blocked
 **Steps:** Send a connect request to someone you already have a pending request with.
