@@ -28,8 +28,8 @@ Sprint 7.6 (WebRTC) is complete and merged to `main`. Remediation work continued
 
 ## 4. New Issues Found & Resolved This Cycle
 
-### SECURITY-001: AdminDiagnosticsController IDOR — ✅ RESOLVED
-Any authenticated user could read/wipe any other user's diagnostic logs (only `[Authorize]`, no ownership check). Fixed: merged into `DiagnosticsController`, added `ICurrentUserService.UserId` ownership check returning `403 Forbidden` on mismatch. Verified on GitHub, commit `b0a7c68`. `client-logs` ingestion endpoint checked separately and confirmed it was never vulnerable (already derived `userId` server-side from the JWT claim).
+### SECURITY-001: DiagnosticsController IDOR — ✅ RESOLVED
+Any authenticated user could read/wipe any other user's diagnostic logs (only `[Authorize]`, no ownership check). Fixed: added `ICurrentUserService.UserId` ownership check returning `403 Forbidden` on mismatch. Verified on GitHub, commit `b0a7c68`. `client-logs` ingestion endpoint checked separately and confirmed it was never vulnerable (already derived `userId` server-side from the JWT claim).
 
 ### INFRA-001: Missing EF migration safety net — ✅ RESOLVED
 Root cause of the earlier `RefreshTokens`-missing-in-production incident: neither `scripts/dev.ps1` nor `scripts/deploy-prod.ps1` applied migrations automatically. Fixed: both scripts now check for pending migrations and auto-apply, fail-fast on error. Verified on GitHub, commit `78c8f1b`.
@@ -69,4 +69,4 @@ When asked to manually browser-test the full checklist, Antigravity's first pass
 
 ## 7. One-Line State
 
-**Batch 1 and 2 remediation are complete except TEST-002 (paused, needs resuming). Two new issues were found and resolved this cycle (AdminDiagnosticsController IDOR, missing migration safety net in both dev/prod scripts), plus one test-infrastructure fragility fixed. One genuine feature gap was found via manual testing (no disconnect-connection endpoint) and is now tracked as open. A process failure — Antigravity presenting static code analysis as live manual testing — was caught and corrected, with a living test-flow document now in place to prevent recurrence.**
+**Batch 1 and 2 remediation are complete except TEST-002 (paused, needs resuming). Two new issues were found and resolved this cycle (DiagnosticsController IDOR, missing migration safety net in both dev/prod scripts), plus one test-infrastructure fragility fixed. One genuine feature gap was found via manual testing (no disconnect-connection endpoint) and is now tracked as open. A process failure — Antigravity presenting static code analysis as live manual testing — was caught and corrected, with a living test-flow document now in place to prevent recurrence.**

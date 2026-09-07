@@ -91,6 +91,17 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 
 ---
 
+
+### A9 — Google Login (PLANNED)
+**Steps:** User selects "Continue with Google". Flutter/Web client initiates Google authentication. Google authenticates the user. Client obtains provider authentication result. Connect backend validates provider identity/token server-side. Backend resolves the Connect account (link existing or create new). Backend issues normal Connect authentication session (access JWT + refresh token).
+**Expected:** Client stores/uses the Connect session using the existing auth architecture.
+**Status:** Not Implemented / Planned
+
+### A10 — Apple Login (PLANNED)
+**Steps:** User selects "Continue with Apple". Flutter/Web client initiates Apple Sign In. Apple authenticates the user. Client obtains Apple identity result. Connect backend validates Apple identity/token server-side. Backend resolves/links account. Backend issues normal Connect session (access JWT + refresh token).
+**Expected:** Client continues using the same authenticated application flow.
+**Status:** Not Implemented / Planned
+
 ## 2. CONNECTIONS
 
 ### C1 — Send connect request

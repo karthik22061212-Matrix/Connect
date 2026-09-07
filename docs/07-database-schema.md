@@ -31,3 +31,12 @@ They are stored in the bounded singleton in-memory diagnostic service:
 
 ## Retention
 Call history and account-retention policies are enforced by the existing background processing.
+
+
+## Future / Planned (Google & Apple Authentication)
+To support planned Google and Apple login flows, provider identity storage will be required in the future.
+*These columns/tables DO NOT CURRENTLY EXIST in the schema.*
+Conceptually, the following will be required:
+- authentication provider (e.g., Google, Apple)
+- provider subject / unique provider identifier
+- user-account linkage

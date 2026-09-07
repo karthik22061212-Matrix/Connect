@@ -16,7 +16,8 @@
 | Sprint 7.5 | Azure migration | ✅ Infrastructure complete |
 | Sprint 7.6 | WebRTC media/reliability | ✅ Implementation complete |
 | Diagnostic logging | Production-oriented diagnostics | ✅ Implementation complete |
-| Sprint 8 | Final Web release | ⏳ Pending QA |
+| Sprint 8 | Final Web release (Web MVP) | ⏳ Pending QA |
+| Future | Google Login & Apple Login | ⏳ Planned |
 
 ## Sprint 7.6 implementation completed
 - `flutter_webrtc`
