@@ -5,6 +5,17 @@
 **Status values:** `Not Run` | `Passed` | `Failed` | `Blocked` (can't be tested — dependency missing) | `UI Incomplete` (no UI exists for this yet, backend-only)
 
 ## Execution Protocol (read this every time before running a test)
+
+### TEXT-ONLY QA RULE (NO SCREENSHOTS)
+- Do NOT add, embed, reference, or require screenshots for test evidence.
+- The manual QA process must be **TEXT-ONLY**.
+- For every test case, use only: Preconditions, Steps, Expected, Actual, Status, Notes/failure details.
+- Do NOT create fields such as: Screenshot, Screenshot Path, Evidence Image, Attachment, Screenshot Required.
+- Do NOT insert image links or Markdown image syntax (e.g. `![...](...)`).
+- Do NOT ask testers to attach screenshots to the repository.
+- A test is considered Passed only when the behavior was actually verified in the browser/application, but the verification result must be recorded as text in the `Actual:` field.
+- Do not write phrases like "See screenshot", "Verified with screenshot", or "Screenshot attached".
+
 When told "pick next test and verify":
 1. Find the first test case with Status "Not Run", top to bottom. Skip anything already Passed/Failed/Blocked.
 2. Execute ONLY that one test case via actual browser interaction at [http://localhost:8080](http://localhost:8080). No API-only shortcuts, no code reading to infer behavior — a real click-through using the browser subagent.
@@ -353,5 +364,6 @@ Copy this block when adding a new test as functionality is built:
 ### [ID] — [Short name]
 **Steps:** [exact steps to perform]
 **Expected:** [exact expected result/response]
+**Actual:** [text-only verification details]
 **Status:** Not Run
 ```
