@@ -15,6 +15,7 @@
 - Do NOT ask testers to attach screenshots to the repository.
 - A test is considered Passed only when the behavior was actually verified in the browser/application, but the verification result must be recorded as text in the `Actual:` field.
 - Do not write phrases like "See screenshot", "Verified with screenshot", or "Screenshot attached".
+- Do not take Screenshots/Images.
 
 When told "pick next test and verify":
 1. Find the first test case with Status "Not Run", top to bottom. Skip anything already Passed/Failed/Blocked.
@@ -153,7 +154,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C7 — Connections list empty state
 **Steps:** View the connections list on a brand-new account with zero connections.
 **Expected:** Clean empty state shown, no error.
-**Status:** Not Run
+**Actual:** Registered a brand-new account (`testuser4`) and navigated to the Contacts tab. The "Connected Contacts" section displays a clean empty state consisting of a rounded container with a two-people icon, the text "No connected contacts yet", and a subtitle "Search for users above and send a connect request." No errors were encountered.
+**Status:** Passed
 
 ### C8 — Pending requests list empty state
 **Steps:** View the "Sent Requests" and "Received Requests" tabs with zero pending requests.
