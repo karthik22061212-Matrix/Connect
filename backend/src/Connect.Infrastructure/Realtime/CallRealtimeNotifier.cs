@@ -75,22 +75,22 @@ public class CallRealtimeNotifier : ICallRealtimeNotifier
             // Concurrent call state modification already committed; proceed with notification
         }
 
-        foreach (var call in targetCalls)
-        {
-            try
-            {
-                var userAConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userAId);
-                var userBConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userBId);
-                var allConnections = userAConnections.Concat(userBConnections).Distinct().ToList();
+        var userAConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userAId);
+        var userBConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userBId);
+        var allConnections = userAConnections.Concat(userBConnections).Distinct().ToList();
 
-                if (allConnections.Count > 0)
+        if (allConnections.Count > 0)
+        {
+            foreach (var call in targetCalls)
+            {
+                try
                 {
                     await _hubContext.Clients.Clients(allConnections).CallEnded(call.Id);
                 }
-            }
-            catch
-            {
-                // SignalR teardown notification is best-effort
+                catch
+                {
+                    // SignalR teardown notification is best-effort
+                }
             }
         }
     }

@@ -207,4 +207,33 @@ public class CallRealtimeNotifierTests
         _presenceTrackerMock.Verify(p => p.SetUserPresenceAsync(_userBId, PresenceStatus.Online), Times.Once);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task TerminateActiveCallsBetweenUsersAsync_SignalRThrows_SwallowsExceptionAndCompletes()
+    {
+        var call = new Call
+        {
+            Id = Guid.NewGuid(),
+            CallerId = _userAId,
+            CalleeId = _userBId,
+            Status = CallStatus.Accepted
+        };
+
+        _callRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Call> { call });
+        _userRepoMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User { PresenceStatus = PresenceStatus.Busy });
+
+        _presenceTrackerMock.Setup(p => p.GetConnectionIdsForUserAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(new List<string> { "conn-1" });
+
+        _clientProxyMock.Setup(c => c.CallEnded(It.IsAny<Guid>()))
+            .ThrowsAsync(new InvalidOperationException("SignalR network error"));
+
+        // Must not throw
+        await _notifier.TerminateActiveCallsBetweenUsersAsync(_userAId, _userBId, "UserBlocked", CancellationToken.None);
+
+        Assert.Equal(CallStatus.Failed, call.Status);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

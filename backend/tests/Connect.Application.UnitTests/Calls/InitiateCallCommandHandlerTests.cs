@@ -35,6 +35,8 @@ public class InitiateCallCommandHandlerTests
 
         _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
 
         _handler = new InitiateCallCommandHandler(
             _unitOfWorkMock.Object,
@@ -101,8 +103,8 @@ public class InitiateCallCommandHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(callee);
 
-        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Block { BlockerUserId = _callerId, BlockedUserId = _calleeId });
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block> { new Block { BlockerUserId = _callerId, BlockedUserId = _calleeId } });
 
         var command = new InitiateCallCommand(_calleeId);
 
@@ -122,8 +124,8 @@ public class InitiateCallCommandHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(callee);
 
-        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Block { BlockerUserId = _calleeId, BlockedUserId = _callerId });
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block> { new Block { BlockerUserId = _calleeId, BlockedUserId = _callerId } });
 
         var command = new InitiateCallCommand(_calleeId);
 
@@ -135,6 +137,32 @@ public class InitiateCallCommandHandlerTests
         _callRepoMock.Verify(r => r.Add(It.IsAny<Call>()), Times.Never);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
         _pushNotificationServiceMock.Verify(p => p.SendMissedCallNotificationAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MissedReason>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_MutualBlock_PrioritizesCallerBlockConflict()
+    {
+        var caller = new User { Id = _callerId, UserId = "caller" };
+        var callee = new User { Id = _calleeId, UserId = "callee" };
+
+        _userRepoMock.Setup(r => r.GetByIdAsync(_callerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(caller);
+        _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(callee);
+
+        // Both users have blocked each other
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>
+            {
+                new Block { BlockerUserId = _calleeId, BlockedUserId = _callerId },
+                new Block { BlockerUserId = _callerId, BlockedUserId = _calleeId }
+            });
+
+        var command = new InitiateCallCommand(_calleeId);
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            _handler.Handle(command, CancellationToken.None));
+        Assert.Contains("You have blocked this user", ex.Message);
     }
 
     [Fact]

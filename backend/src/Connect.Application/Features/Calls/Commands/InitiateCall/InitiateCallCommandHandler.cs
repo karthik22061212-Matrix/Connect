@@ -52,18 +52,18 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
             throw new NotFoundException("Callee not found.");
         }
 
-        // Check blocks with directionality
-        var blockRecord = await _unitOfWork.Blocks.FirstOrDefaultAsync(b =>
+        // Check blocks with directionality - caller's outgoing block takes precedence
+        var blocks = await _unitOfWork.Blocks.ListAsync(b =>
             (b.BlockerUserId == callerId && b.BlockedUserId == request.CalleeId) ||
             (b.BlockerUserId == request.CalleeId && b.BlockedUserId == callerId), cancellationToken);
 
-        if (blockRecord != null)
+        if (blocks != null && blocks.Any(b => b.BlockerUserId == callerId))
         {
-            if (blockRecord.BlockerUserId == callerId)
-            {
-                throw new ConflictException("You have blocked this user. Unblock them before initiating a call.");
-            }
+            throw new ConflictException("You have blocked this user. Unblock them before initiating a call.");
+        }
 
+        if (blocks != null && blocks.Any(b => b.BlockerUserId == request.CalleeId))
+        {
             // Caller is blocked by callee: Simulate unavailable without disclosing block
             var fakeCallId = Guid.NewGuid();
             return new CallResultDto(fakeCallId, callerId, request.CalleeId, CallStatus.Missed, MissedReason.Offline, callerUser.UserId);

@@ -48,6 +48,8 @@ public class CallSafetyTeardownTests
 
         _dateTimeProviderMock.Setup(d => d.UtcNow).Returns(_utcNow);
         _currentUserServiceMock.Setup(c => c.UserId).Returns(_userAId);
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
 
         _hubContextMock.Setup(h => h.Clients).Returns(_hubClientsMock.Object);
         _hubClientsMock.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(_clientProxyMock.Object);
@@ -190,8 +192,8 @@ public class CallSafetyTeardownTests
             .ReturnsAsync(callee);
 
         // Callee blocked caller
-        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Block { BlockerUserId = _userBId, BlockedUserId = _userAId });
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block> { new Block { BlockerUserId = _userBId, BlockedUserId = _userAId } });
 
         // Act
         var result = await _initiateHandler.Handle(new InitiateCallCommand(_userBId), CancellationToken.None);
@@ -225,8 +227,8 @@ public class CallSafetyTeardownTests
             .ReturnsAsync(callee);
 
         // Caller blocked callee
-        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Block { BlockerUserId = _userAId, BlockedUserId = _userBId });
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block> { new Block { BlockerUserId = _userAId, BlockedUserId = _userBId } });
 
         // Act & Assert
         var ex = await Assert.ThrowsAsync<ConflictException>(() =>
