@@ -33,18 +33,15 @@ public class SearchUsersQueryHandler : IRequestHandler<SearchUsersQuery, IEnumer
             .Where(u => !u.IsDeleted && (currentUserId == null || u.Id != currentUserId.Value))
             .ToList();
 
-        // Filter out blocked users (in either direction)
-        if (currentUserId != null)
-        {
-            var blockedUserIds = allBlocks
-                .Where(b => b.BlockerUserId == currentUserId.Value || b.BlockedUserId == currentUserId.Value)
-                .Select(b => b.BlockerUserId == currentUserId.Value ? b.BlockedUserId : b.BlockerUserId)
-                .ToHashSet();
+        // Identify users explicitly blocked by current user
+        var usersBlockedByMe = currentUserId != null
+            ? allBlocks
+                .Where(b => b.BlockerUserId == currentUserId.Value)
+                .Select(b => b.BlockedUserId)
+                .ToHashSet()
+            : new HashSet<Guid>();
 
-            candidates = candidates.Where(u => !blockedUserIds.Contains(u.Id)).ToList();
-        }
-
-        // Match query against UserId or PhoneNumber
+        // Match query against UserId, PhoneNumber, or Email
         var matchedUsers = candidates.Where(u =>
             u.UserId.Contains(queryStr, StringComparison.OrdinalIgnoreCase) ||
             (u.PhoneNumber != null && u.PhoneNumber.Contains(queryStr, StringComparison.OrdinalIgnoreCase)) ||
@@ -55,26 +52,47 @@ public class SearchUsersQueryHandler : IRequestHandler<SearchUsersQuery, IEnumer
 
         foreach (var user in matchedUsers)
         {
-            bool isConnected = false;
-            bool hasPendingRequest = false;
+            RelationshipState state = RelationshipState.Available;
             Guid? pendingRequestId = null;
 
             if (currentUserId != null)
             {
-                var minId = currentUserId.Value.CompareTo(user.Id) < 0 ? currentUserId.Value : user.Id;
-                var maxId = currentUserId.Value.CompareTo(user.Id) < 0 ? user.Id : currentUserId.Value;
-
-                isConnected = allConnections.Any(c => c.UserAId == minId && c.UserBId == maxId);
-
-                var pendingReq = allRequests.FirstOrDefault(r =>
-                    r.Status == ConnectRequestStatus.Pending &&
-                    ((r.FromUserId == currentUserId.Value && r.ToUserId == user.Id) ||
-                     (r.FromUserId == user.Id && r.ToUserId == currentUserId.Value)));
-
-                if (pendingReq != null)
+                if (usersBlockedByMe.Contains(user.Id))
                 {
-                    hasPendingRequest = true;
-                    pendingRequestId = pendingReq.Id;
+                    state = RelationshipState.Blocked;
+                }
+                else
+                {
+                    var minId = currentUserId.Value.CompareTo(user.Id) < 0 ? currentUserId.Value : user.Id;
+                    var maxId = currentUserId.Value.CompareTo(user.Id) < 0 ? user.Id : currentUserId.Value;
+
+                    var isConnected = allConnections.Any(c => c.UserAId == minId && c.UserBId == maxId);
+
+                    if (isConnected)
+                    {
+                        state = RelationshipState.Connected;
+                    }
+                    else
+                    {
+                        var outgoingPendingRequest = allRequests.FirstOrDefault(r =>
+                            r.Status == ConnectRequestStatus.Pending &&
+                            r.FromUserId == currentUserId.Value && r.ToUserId == user.Id);
+
+                        var incomingPendingRequest = allRequests.FirstOrDefault(r =>
+                            r.Status == ConnectRequestStatus.Pending &&
+                            r.FromUserId == user.Id && r.ToUserId == currentUserId.Value);
+
+                        if (outgoingPendingRequest != null)
+                        {
+                            state = RelationshipState.PendingSent;
+                            pendingRequestId = outgoingPendingRequest.Id;
+                        }
+                        else if (incomingPendingRequest != null)
+                        {
+                            state = RelationshipState.PendingReceived;
+                            pendingRequestId = incomingPendingRequest.Id;
+                        }
+                    }
                 }
             }
 
@@ -84,8 +102,7 @@ public class SearchUsersQueryHandler : IRequestHandler<SearchUsersQuery, IEnumer
                 user.Email,
                 user.PhoneNumber,
                 user.PresenceStatus,
-                isConnected,
-                hasPendingRequest,
+                state,
                 pendingRequestId
             ));
         }

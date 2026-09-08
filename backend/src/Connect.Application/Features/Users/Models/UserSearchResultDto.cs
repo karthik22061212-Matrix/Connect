@@ -8,7 +8,6 @@ public record UserSearchResultDto(
     string Email,
     string? PhoneNumber,
     PresenceStatus PresenceStatus,
-    bool IsConnected,
-    bool HasPendingRequest,
+    RelationshipState RelationshipState,
     Guid? PendingRequestId
 );
