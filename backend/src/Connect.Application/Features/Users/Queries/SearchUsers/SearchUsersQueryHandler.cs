@@ -27,10 +27,21 @@ public class SearchUsersQueryHandler : IRequestHandler<SearchUsersQuery, IEnumer
         var allConnections = await _unitOfWork.Connections.ListAsync(cancellationToken);
         var allRequests = await _unitOfWork.ConnectRequests.ListAsync(cancellationToken);
         var allBlocks = await _unitOfWork.Blocks.ListAsync(cancellationToken);
+        var allReports = await _unitOfWork.Reports.ListAsync(cancellationToken);
 
-        // Filter out soft-deleted users and current user
+        // Identify reported users in either direction for mutual exclusion
+        var reportedUserIds = currentUserId != null
+            ? allReports
+                .Where(r => r.ReporterUserId == currentUserId.Value || r.ReportedUserId == currentUserId.Value)
+                .Select(r => r.ReporterUserId == currentUserId.Value ? r.ReportedUserId : r.ReporterUserId)
+                .ToHashSet()
+            : new HashSet<Guid>();
+
+        // Filter candidates: soft-deleted, self, and reported users excluded
         var candidates = allUsers
-            .Where(u => !u.IsDeleted && (currentUserId == null || u.Id != currentUserId.Value))
+            .Where(u => !u.IsDeleted &&
+                        (currentUserId == null || u.Id != currentUserId.Value) &&
+                        !reportedUserIds.Contains(u.Id))
             .ToList();
 
         // Identify users explicitly blocked by current user
