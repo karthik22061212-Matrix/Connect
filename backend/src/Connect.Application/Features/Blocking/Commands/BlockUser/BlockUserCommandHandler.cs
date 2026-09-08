@@ -11,15 +11,18 @@ public class BlockUserCommandHandler : IRequestHandler<BlockUserCommand, bool>
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly ICallRealtimeNotifier _callRealtimeNotifier;
 
     public BlockUserCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        ICallRealtimeNotifier callRealtimeNotifier)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _dateTimeProvider = dateTimeProvider;
+        _callRealtimeNotifier = callRealtimeNotifier;
     }
 
     public async Task<bool> Handle(BlockUserCommand request, CancellationToken cancellationToken)
@@ -66,6 +69,9 @@ public class BlockUserCommandHandler : IRequestHandler<BlockUserCommand, bool>
         {
             throw new ConflictException("User is already blocked.");
         }
+
+        await _callRealtimeNotifier.TerminateActiveCallsBetweenUsersAsync(
+            currentUserId.Value, request.UserIdToBlock, "UserBlocked", cancellationToken);
 
         return true;
     }

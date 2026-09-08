@@ -46,6 +46,26 @@ public class CallRealtimeNotifier : ICallRealtimeNotifier
             call.TimeoutType = null;
         }
 
+        await _presenceTracker.SetUserPresenceAsync(userAId, PresenceStatus.Online);
+        await _presenceTracker.SetUserPresenceAsync(userBId, PresenceStatus.Online);
+
+        if (_unitOfWork.Users != null)
+        {
+            var userA = await _unitOfWork.Users.GetByIdAsync(userAId, ct);
+            if (userA != null && !userA.IsDeleted)
+            {
+                userA.PresenceStatus = PresenceStatus.Online;
+                userA.UpdatedAt = _dateTimeProvider.UtcNow;
+            }
+
+            var userB = await _unitOfWork.Users.GetByIdAsync(userBId, ct);
+            if (userB != null && !userB.IsDeleted)
+            {
+                userB.PresenceStatus = PresenceStatus.Online;
+                userB.UpdatedAt = _dateTimeProvider.UtcNow;
+            }
+        }
+
         try
         {
             await _unitOfWork.SaveChangesAsync(ct);

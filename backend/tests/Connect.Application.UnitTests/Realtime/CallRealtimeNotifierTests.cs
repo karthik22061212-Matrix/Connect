@@ -15,6 +15,7 @@ public class CallRealtimeNotifierTests
     private readonly Mock<IPresenceTracker> _presenceTrackerMock = new();
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<IRepository<Call>> _callRepoMock = new();
+    private readonly Mock<IRepository<User>> _userRepoMock = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProviderMock = new();
     private readonly CallRealtimeNotifier _notifier;
 
@@ -28,6 +29,7 @@ public class CallRealtimeNotifierTests
         _hubClientsMock.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(_clientProxyMock.Object);
 
         _unitOfWorkMock.Setup(u => u.Calls).Returns(_callRepoMock.Object);
+        _unitOfWorkMock.Setup(u => u.Users).Returns(_userRepoMock.Object);
         _dateTimeProviderMock.Setup(d => d.UtcNow).Returns(_utcNow);
 
         _notifier = new CallRealtimeNotifier(
@@ -130,5 +132,79 @@ public class CallRealtimeNotifierTests
 
         _clientProxyMock.Verify(c => c.ConnectionRemoved(_userBId), Times.Once);
         _clientProxyMock.Verify(c => c.ConnectionRemoved(_userAId), Times.Once);
+    }
+
+    [Fact]
+    public async Task TerminateActiveCallsBetweenUsersAsync_AcceptedCall_ResetsParticipantPresenceFromBusyToOnline()
+    {
+        var acceptedCall = new Call
+        {
+            Id = Guid.NewGuid(),
+            CallerId = _userAId,
+            CalleeId = _userBId,
+            Status = CallStatus.Accepted
+        };
+
+        var userA = new User { Id = _userAId, PresenceStatus = PresenceStatus.Busy };
+        var userB = new User { Id = _userBId, PresenceStatus = PresenceStatus.Busy };
+
+        _callRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Call> { acceptedCall });
+        _userRepoMock.Setup(r => r.GetByIdAsync(_userAId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(userA);
+        _userRepoMock.Setup(r => r.GetByIdAsync(_userBId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(userB);
+
+        _presenceTrackerMock.Setup(p => p.GetConnectionIdsForUserAsync(_userAId))
+            .ReturnsAsync(new List<string> { "conn-a" });
+        _presenceTrackerMock.Setup(p => p.GetConnectionIdsForUserAsync(_userBId))
+            .ReturnsAsync(new List<string> { "conn-b" });
+
+        await _notifier.TerminateActiveCallsBetweenUsersAsync(_userAId, _userBId, "UserBlocked", CancellationToken.None);
+
+        Assert.Equal(CallStatus.Failed, acceptedCall.Status);
+        Assert.Equal(PresenceStatus.Online, userA.PresenceStatus);
+        Assert.Equal(PresenceStatus.Online, userB.PresenceStatus);
+
+        _presenceTrackerMock.Verify(p => p.SetUserPresenceAsync(_userAId, PresenceStatus.Online), Times.Once);
+        _presenceTrackerMock.Verify(p => p.SetUserPresenceAsync(_userBId, PresenceStatus.Online), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TerminateActiveCallsBetweenUsersAsync_RingingCall_ResetsParticipantPresenceFromBusyToOnline()
+    {
+        var ringingCall = new Call
+        {
+            Id = Guid.NewGuid(),
+            CallerId = _userAId,
+            CalleeId = _userBId,
+            Status = CallStatus.Ringing
+        };
+
+        var userA = new User { Id = _userAId, PresenceStatus = PresenceStatus.Busy };
+        var userB = new User { Id = _userBId, PresenceStatus = PresenceStatus.Busy };
+
+        _callRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Call> { ringingCall });
+        _userRepoMock.Setup(r => r.GetByIdAsync(_userAId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(userA);
+        _userRepoMock.Setup(r => r.GetByIdAsync(_userBId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(userB);
+
+        _presenceTrackerMock.Setup(p => p.GetConnectionIdsForUserAsync(_userAId))
+            .ReturnsAsync(new List<string> { "conn-a" });
+        _presenceTrackerMock.Setup(p => p.GetConnectionIdsForUserAsync(_userBId))
+            .ReturnsAsync(new List<string> { "conn-b" });
+
+        await _notifier.TerminateActiveCallsBetweenUsersAsync(_userAId, _userBId, "UserBlocked", CancellationToken.None);
+
+        Assert.Equal(CallStatus.Failed, ringingCall.Status);
+        Assert.Equal(PresenceStatus.Online, userA.PresenceStatus);
+        Assert.Equal(PresenceStatus.Online, userB.PresenceStatus);
+
+        _presenceTrackerMock.Verify(p => p.SetUserPresenceAsync(_userAId, PresenceStatus.Online), Times.Once);
+        _presenceTrackerMock.Verify(p => p.SetUserPresenceAsync(_userBId, PresenceStatus.Online), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

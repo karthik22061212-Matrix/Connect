@@ -91,7 +91,7 @@ public class InitiateCallCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_Blocked_ThrowsForbiddenAccessException()
+    public async Task Handle_CallerBlockedCallee_ThrowsConflictException()
     {
         var caller = new User { Id = _callerId, UserId = "caller" };
         var callee = new User { Id = _calleeId, UserId = "callee" };
@@ -101,13 +101,40 @@ public class InitiateCallCommandHandlerTests
         _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(callee);
 
-        _blockRepoMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Block { BlockerUserId = _callerId, BlockedUserId = _calleeId });
 
         var command = new InitiateCallCommand(_calleeId);
 
-        await Assert.ThrowsAsync<ForbiddenAccessException>(() =>
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
             _handler.Handle(command, CancellationToken.None));
+        Assert.Contains("You have blocked this user", ex.Message);
+    }
+
+    [Fact]
+    public async Task Handle_CallerBlockedByCallee_SimulatesMissedOfflineWithoutDisclosing()
+    {
+        var caller = new User { Id = _callerId, UserId = "caller" };
+        var callee = new User { Id = _calleeId, UserId = "callee" };
+
+        _userRepoMock.Setup(r => r.GetByIdAsync(_callerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(caller);
+        _userRepoMock.Setup(r => r.GetByIdAsync(_calleeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(callee);
+
+        _blockRepoMock.Setup(r => r.FirstOrDefaultAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Block, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Block { BlockerUserId = _calleeId, BlockedUserId = _callerId });
+
+        var command = new InitiateCallCommand(_calleeId);
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(CallStatus.Missed, result.Status);
+        Assert.Equal(MissedReason.Offline, result.MissedReason);
+        _callRepoMock.Verify(r => r.Add(It.IsAny<Call>()), Times.Never);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _pushNotificationServiceMock.Verify(p => p.SendMissedCallNotificationAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MissedReason>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

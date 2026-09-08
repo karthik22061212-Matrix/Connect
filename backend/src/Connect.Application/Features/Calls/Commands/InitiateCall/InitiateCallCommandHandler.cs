@@ -52,14 +52,21 @@ public class InitiateCallCommandHandler : IRequestHandler<InitiateCallCommand, C
             throw new NotFoundException("Callee not found.");
         }
 
-        // Check blocks
-        var isBlocked = await _unitOfWork.Blocks.AnyAsync(b =>
+        // Check blocks with directionality
+        var blockRecord = await _unitOfWork.Blocks.FirstOrDefaultAsync(b =>
             (b.BlockerUserId == callerId && b.BlockedUserId == request.CalleeId) ||
             (b.BlockerUserId == request.CalleeId && b.BlockedUserId == callerId), cancellationToken);
 
-        if (isBlocked)
+        if (blockRecord != null)
         {
-            throw new ForbiddenAccessException("Cannot call this user.");
+            if (blockRecord.BlockerUserId == callerId)
+            {
+                throw new ConflictException("You have blocked this user. Unblock them before initiating a call.");
+            }
+
+            // Caller is blocked by callee: Simulate unavailable without disclosing block
+            var fakeCallId = Guid.NewGuid();
+            return new CallResultDto(fakeCallId, callerId, request.CalleeId, CallStatus.Missed, MissedReason.Offline, callerUser.UserId);
         }
 
         // Enforce Connection ordering rule: UserAId < UserBId

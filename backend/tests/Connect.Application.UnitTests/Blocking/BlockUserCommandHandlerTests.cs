@@ -14,6 +14,7 @@ public class BlockUserCommandHandlerTests
     private readonly Mock<IRepository<Block>> _blockRepoMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProviderMock = new();
+    private readonly Mock<ICallRealtimeNotifier> _callRealtimeNotifierMock = new();
     private readonly BlockUserCommandHandler _handler;
 
     private readonly Guid _userId = Guid.NewGuid();
@@ -29,7 +30,8 @@ public class BlockUserCommandHandlerTests
         _handler = new BlockUserCommandHandler(
             _unitOfWorkMock.Object,
             _currentUserServiceMock.Object,
-            _dateTimeProviderMock.Object);
+            _dateTimeProviderMock.Object,
+            _callRealtimeNotifierMock.Object);
     }
 
     [Fact]
@@ -40,7 +42,7 @@ public class BlockUserCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ValidBlock_AddsBlockRecord()
+    public async Task Handle_ValidBlock_AddsBlockRecordAndTerminatesCalls()
     {
         var targetUser = new User { Id = _targetUserId, UserId = "target" };
         _userRepoMock.Setup(r => r.GetByIdAsync(_targetUserId, It.IsAny<CancellationToken>()))
@@ -55,6 +57,7 @@ public class BlockUserCommandHandlerTests
         Assert.True(result);
         _blockRepoMock.Verify(r => r.Add(It.Is<Block>(b => b.BlockerUserId == _userId && b.BlockedUserId == _targetUserId)), Times.Once);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _callRealtimeNotifierMock.Verify(n => n.TerminateActiveCallsBetweenUsersAsync(_userId, _targetUserId, "UserBlocked", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -72,5 +75,6 @@ public class BlockUserCommandHandlerTests
 
         var command = new BlockUserCommand(_targetUserId);
         await Assert.ThrowsAsync<ConflictException>(() => _handler.Handle(command, CancellationToken.None));
+        _callRealtimeNotifierMock.Verify(n => n.TerminateActiveCallsBetweenUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }
