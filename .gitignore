@@ -49,3 +49,10 @@ backend/logs/
 
 # Ignore specific build artifacts and test junk
 payload.json
+
+# BMad / AI agent local files
+_bmad/
+_bmad-output/
+.agent/
+.agents/
+.github/agents/
