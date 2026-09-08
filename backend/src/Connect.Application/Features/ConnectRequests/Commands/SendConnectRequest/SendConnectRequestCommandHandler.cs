@@ -43,14 +43,27 @@ public class SendConnectRequestCommandHandler : IRequestHandler<SendConnectReque
             throw new NotFoundException("Target user not found.");
         }
 
-        // Check if blocked
-        var isBlocked = await _unitOfWork.Blocks.AnyAsync(b =>
+        // Check block relationship
+        var blockRecord = await _unitOfWork.Blocks.FirstOrDefaultAsync(b =>
             (b.BlockerUserId == fromUserId && b.BlockedUserId == toUserId) ||
             (b.BlockerUserId == toUserId && b.BlockedUserId == fromUserId), cancellationToken);
 
-        if (isBlocked)
+        if (blockRecord != null)
         {
-            throw new ForbiddenAccessException("Cannot send connect request to this user.");
+            if (blockRecord.BlockerUserId == fromUserId)
+            {
+                throw new ConflictException("You have blocked this user. Unblock them before sending a request.");
+            }
+
+            // Silently suppress request if caller is blocked by target user (shadow drop)
+            return new ConnectRequestDto(
+                Guid.NewGuid(),
+                fromUserId,
+                toUserId,
+                ConnectRequestStatus.Pending,
+                _dateTimeProvider.UtcNow,
+                null
+            );
         }
 
         // Check if already connected (enforce UserAId < UserBId rule)
