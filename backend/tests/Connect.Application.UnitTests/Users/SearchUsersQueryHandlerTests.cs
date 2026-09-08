@@ -579,5 +579,83 @@ public class SearchUsersQueryHandlerTests
         Assert.Single(results);
         Assert.Equal(_targetUserId, results.First().Id);
     }
+
+    [Fact]
+    public async Task Handle_TargetUserReportedByMe_ExcludedFromSearchResults()
+    {
+        var targetUser = new User
+        {
+            Id = _targetUserId,
+            UserId = "target_user",
+            Email = "target@example.com",
+            PresenceStatus = PresenceStatus.Online
+        };
+
+        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<User> { targetUser });
+        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Connection>());
+        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ConnectRequest>());
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
+        _reportRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Report>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    ReporterUserId = _currentUserId,
+                    ReportedUserId = _targetUserId,
+                    Status = ReportStatus.Open
+                }
+            });
+
+        var handler = new SearchUsersQueryHandler(_unitOfWorkMock.Object, _currentUserServiceMock.Object);
+        var query = new SearchUsersQuery("target");
+
+        var results = (await handler.Handle(query, CancellationToken.None)).ToList();
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task Handle_TargetUserReportedMe_ExcludedFromSearchResults()
+    {
+        var targetUser = new User
+        {
+            Id = _targetUserId,
+            UserId = "target_user",
+            Email = "target@example.com",
+            PresenceStatus = PresenceStatus.Online
+        };
+
+        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<User> { targetUser });
+        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Connection>());
+        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ConnectRequest>());
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
+        _reportRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Report>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    ReporterUserId = _targetUserId,
+                    ReportedUserId = _currentUserId,
+                    Status = ReportStatus.Open
+                }
+            });
+
+        var handler = new SearchUsersQueryHandler(_unitOfWorkMock.Object, _currentUserServiceMock.Object);
+        var query = new SearchUsersQuery("target");
+
+        var results = (await handler.Handle(query, CancellationToken.None)).ToList();
+
+        Assert.Empty(results);
+    }
 }
 

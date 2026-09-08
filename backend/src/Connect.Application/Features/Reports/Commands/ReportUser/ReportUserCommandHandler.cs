@@ -11,15 +11,18 @@ public class ReportUserCommandHandler : IRequestHandler<ReportUserCommand, Guid>
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly ICallRealtimeNotifier _callRealtimeNotifier;
 
     public ReportUserCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        ICallRealtimeNotifier callRealtimeNotifier)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _dateTimeProvider = dateTimeProvider;
+        _callRealtimeNotifier = callRealtimeNotifier;
     }
 
     public async Task<Guid> Handle(ReportUserCommand request, CancellationToken cancellationToken)
@@ -51,6 +54,33 @@ public class ReportUserCommandHandler : IRequestHandler<ReportUserCommand, Guid>
             return existingOpenReport.Id;
         }
 
+        // Cascade 1: Sever Active Connection
+        var minId = currentUserId.Value.CompareTo(request.ReportedUserId) < 0 ? currentUserId.Value : request.ReportedUserId;
+        var maxId = currentUserId.Value.CompareTo(request.ReportedUserId) < 0 ? request.ReportedUserId : currentUserId.Value;
+
+        var existingConnection = await _unitOfWork.Connections.FirstOrDefaultAsync(
+            c => c.UserAId == minId && c.UserBId == maxId, cancellationToken);
+        if (existingConnection != null)
+        {
+            _unitOfWork.Connections.Remove(existingConnection);
+        }
+
+        // Cascade 2: Cancel Pending Connect Requests (Both Directions)
+        var pendingRequests = (await _unitOfWork.ConnectRequests.ListAsync(cancellationToken)) ?? Array.Empty<ConnectRequest>();
+        var mutualPending = pendingRequests
+            .Where(r => r.Status == ConnectRequestStatus.Pending &&
+                       ((r.FromUserId == currentUserId.Value && r.ToUserId == request.ReportedUserId) ||
+                        (r.FromUserId == request.ReportedUserId && r.ToUserId == currentUserId.Value)))
+            .ToList();
+
+        foreach (var req in mutualPending)
+        {
+            req.Status = ConnectRequestStatus.Declined;
+            req.RespondedAt = _dateTimeProvider.UtcNow;
+            req.UpdatedAt = _dateTimeProvider.UtcNow;
+        }
+
+        // Cascade 3: Mutual Search Exclusion (enforced automatically via Report row persistence)
         var report = new Report
         {
             Id = Guid.NewGuid(),
@@ -65,6 +95,16 @@ public class ReportUserCommandHandler : IRequestHandler<ReportUserCommand, Guid>
 
         _unitOfWork.Reports.Add(report);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Cascade 4: Terminate In-Flight Calls
+        await _callRealtimeNotifier.TerminateActiveCallsBetweenUsersAsync(
+            currentUserId.Value, request.ReportedUserId, "UserReported", cancellationToken);
+
+        if (existingConnection != null)
+        {
+            await _callRealtimeNotifier.NotifyConnectionRemovedAsync(
+                currentUserId.Value, request.ReportedUserId, cancellationToken);
+        }
 
         return report.Id;
     }

@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddHostedService<CallTimeoutBackgroundService>();
 
         services.AddSignalR();
+        services.AddScoped<ICallRealtimeNotifier, Realtime.CallRealtimeNotifier>();
 
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
