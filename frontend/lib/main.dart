@@ -1156,6 +1156,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
         });
       }
     });
+
+    _searchQueryController.addListener(() {
+      if (!mounted) return;
+      if (_searchQueryController.text.trim().isEmpty && (_searchResults.isNotEmpty || _isSearching)) {
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
+      }
+    });
   }
 
   @override
@@ -1832,7 +1842,13 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
     if (session == null) return;
 
     final q = _searchQueryController.text.trim();
-    if (q.isEmpty) return;
+    if (q.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
 
     setState(() {
       _isSearching = true;
@@ -1848,9 +1864,16 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
       _log('Search Users "$q" -> Status ${res.statusCode}: ${res.body}');
 
       if (res.statusCode == 200) {
-        setState(() {
-          _searchResults = jsonDecode(res.body);
-        });
+        if (_searchQueryController.text.trim().isEmpty) {
+          setState(() {
+            _searchResults = [];
+            _isSearching = false;
+          });
+        } else {
+          setState(() {
+            _searchResults = jsonDecode(res.body);
+          });
+        }
       } else {
         setState(() {
           _searchResults = [];
@@ -3285,9 +3308,32 @@ class _MainConsumerDashboardState extends State<MainConsumerDashboard> {
                 child: TextField(
                   controller: _searchQueryController,
                   onSubmitted: (_) => _searchUsers(),
-                  decoration: const InputDecoration(
+                  onChanged: (val) {
+                    if (val.trim().isEmpty && (_searchResults.isNotEmpty || _isSearching)) {
+                      setState(() {
+                        _searchResults = [];
+                        _isSearching = false;
+                      });
+                    } else {
+                      setState(() {});
+                    }
+                  },
+                  decoration: InputDecoration(
                     hintText: 'Search user handle (e.g. user_two) or phone...',
-                    prefixIcon: Icon(Icons.search, size: 22),
+                    prefixIcon: const Icon(Icons.search, size: 22),
+                    suffixIcon: _searchQueryController.text.isNotEmpty
+                        ? IconButton(
+                            tooltip: 'Clear search',
+                            icon: const Icon(Icons.clear, size: 20),
+                            onPressed: () {
+                              _searchQueryController.clear();
+                              setState(() {
+                                _searchResults = [];
+                                _isSearching = false;
+                              });
+                            },
+                          )
+                        : null,
                   ),
                 ),
               ),
