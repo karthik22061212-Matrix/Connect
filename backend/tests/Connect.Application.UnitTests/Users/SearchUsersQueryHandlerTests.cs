@@ -550,4 +550,34 @@ public class SearchUsersQueryHandlerTests
         Assert.Equal(_targetUserId, result.Id);
         Assert.Equal(RelationshipState.Blocked, result.RelationshipState);
     }
+
+    [Fact]
+    public async Task Handle_NullQuery_DoesNotThrowAndReturnsAllCandidates()
+    {
+        var targetUser = new User
+        {
+            Id = _targetUserId,
+            UserId = "target_user",
+            Email = "target@example.com",
+            PresenceStatus = PresenceStatus.Online
+        };
+
+        _userRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<User> { targetUser });
+        _connectionRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Connection>());
+        _requestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ConnectRequest>());
+        _blockRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Block>());
+
+        var handler = new SearchUsersQueryHandler(_unitOfWorkMock.Object, _currentUserServiceMock.Object);
+        var query = new SearchUsersQuery(null!);
+
+        var results = (await handler.Handle(query, CancellationToken.None)).ToList();
+
+        Assert.Single(results);
+        Assert.Equal(_targetUserId, results.First().Id);
+    }
 }
+

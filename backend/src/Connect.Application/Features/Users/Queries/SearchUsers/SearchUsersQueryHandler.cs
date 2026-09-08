@@ -21,7 +21,7 @@ public class SearchUsersQueryHandler : IRequestHandler<SearchUsersQuery, IEnumer
     public async Task<IEnumerable<UserSearchResultDto>> Handle(SearchUsersQuery request, CancellationToken cancellationToken)
     {
         var currentUserId = _currentUserService.UserId;
-        var queryStr = request.Query.Trim();
+        var queryStr = request.Query?.Trim() ?? string.Empty;
 
         var allUsers = await _unitOfWork.Users.ListAsync(cancellationToken);
         var allConnections = await _unitOfWork.Connections.ListAsync(cancellationToken);
