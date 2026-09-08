@@ -41,6 +41,16 @@ public class ReportUserCommandHandler : IRequestHandler<ReportUserCommand, Guid>
             throw new NotFoundException("Reported user not found.");
         }
 
+        var existingOpenReport = await _unitOfWork.Reports.FirstOrDefaultAsync(r =>
+            r.ReporterUserId == currentUserId.Value &&
+            r.ReportedUserId == request.ReportedUserId &&
+            r.Status == ReportStatus.Open, cancellationToken);
+
+        if (existingOpenReport != null)
+        {
+            return existingOpenReport.Id;
+        }
+
         var report = new Report
         {
             Id = Guid.NewGuid(),

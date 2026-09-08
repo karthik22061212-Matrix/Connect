@@ -58,4 +58,72 @@ public class ReportUserCommandHandlerTests
         )), Times.Once);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task Handle_NonExistentUser_ThrowsNotFoundException()
+    {
+        _userRepoMock.Setup(r => r.GetByIdAsync(_reportedUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((User?)null);
+
+        var command = new ReportUserCommand(_reportedUserId, "Spam", "Notes");
+        await Assert.ThrowsAsync<NotFoundException>(() => _handler.Handle(command, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Handle_ExistingOpenReport_ReturnsExistingIdWithoutCreatingNewReport()
+    {
+        var reportedUser = new User { Id = _reportedUserId, UserId = "bad_user" };
+        _userRepoMock.Setup(r => r.GetByIdAsync(_reportedUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(reportedUser);
+
+        var existingReportId = Guid.NewGuid();
+        var existingReport = new Report
+        {
+            Id = existingReportId,
+            ReporterUserId = _userId,
+            ReportedUserId = _reportedUserId,
+            Reason = "Harassment",
+            Note = "Previous note",
+            Status = ReportStatus.Open,
+            CreatedAt = DateTime.UtcNow.AddHours(-1),
+            UpdatedAt = DateTime.UtcNow.AddHours(-1)
+        };
+
+        _reportRepoMock.Setup(r => r.FirstOrDefaultAsync(
+            It.IsAny<System.Linq.Expressions.Expression<Func<Report, bool>>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingReport);
+
+        var command = new ReportUserCommand(_reportedUserId, "Spam", "Duplicate report attempt");
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        Assert.Equal(existingReportId, result);
+        _reportRepoMock.Verify(r => r.Add(It.IsAny<Report>()), Times.Never);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_ExistingResolvedReport_CreatesNewReportRecord()
+    {
+        var reportedUser = new User { Id = _reportedUserId, UserId = "bad_user" };
+        _userRepoMock.Setup(r => r.GetByIdAsync(_reportedUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(reportedUser);
+
+        _reportRepoMock.Setup(r => r.FirstOrDefaultAsync(
+            It.IsAny<System.Linq.Expressions.Expression<Func<Report, bool>>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Report?)null);
+
+        var command = new ReportUserCommand(_reportedUserId, "Spam", "New report after resolved");
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result);
+        _reportRepoMock.Verify(r => r.Add(It.Is<Report>(rep =>
+            rep.ReporterUserId == _userId &&
+            rep.ReportedUserId == _reportedUserId &&
+            rep.Reason == "Spam" &&
+            rep.Status == ReportStatus.Open
+        )), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
 }
