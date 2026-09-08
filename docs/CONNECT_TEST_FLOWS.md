@@ -161,7 +161,8 @@ For tests requiring two accounts interacting (connections, blocking, presence), 
 ### C8 — Pending requests list empty state
 **Steps:** View the "Sent Requests" and "Received Requests" tabs with zero pending requests.
 **Expected:** Clean empty state shown for both, no error.
-**Status:** Not Run
+**Actual:** Logged in as `testuser4` (a clean account with zero connections). Navigated to the Requests tab. Under "Received Requests", it displays an inbox icon, "No pending requests", and "When users send you connect requests, they will appear here." Under "Sent Requests", it displays an outbox icon, "No sent requests", and "Connect requests you send to other users will be tracked here." No console or UI errors occurred.
+**Status:** Passed
 
 ---
 
