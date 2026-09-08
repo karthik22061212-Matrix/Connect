@@ -1,6 +1,7 @@
 using Connect.Application.Common.Interfaces;
 using Connect.Domain.Enums;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Connect.Infrastructure.Realtime;
 
@@ -31,6 +32,11 @@ public class CallRealtimeNotifier : ICallRealtimeNotifier
             ((c.CallerId == userAId && c.CalleeId == userBId) || (c.CallerId == userBId && c.CalleeId == userAId))
         ).ToList();
 
+        if (targetCalls.Count == 0)
+        {
+            return;
+        }
+
         foreach (var call in targetCalls)
         {
             call.Status = CallStatus.Failed;
@@ -38,31 +44,52 @@ public class CallRealtimeNotifier : ICallRealtimeNotifier
             call.UpdatedAt = _dateTimeProvider.UtcNow;
             call.TimeoutDeadline = null;
             call.TimeoutType = null;
-
-            var userAConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userAId);
-            var userBConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userBId);
-            var allConnections = userAConnections.Concat(userBConnections).Distinct().ToList();
-
-            if (allConnections.Count > 0)
-            {
-                await _hubContext.Clients.Clients(allConnections).CallEnded(call.Id);
-            }
         }
 
-        if (targetCalls.Count > 0)
+        try
         {
             await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Concurrent call state modification already committed; proceed with notification
+        }
+
+        foreach (var call in targetCalls)
+        {
+            try
+            {
+                var userAConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userAId);
+                var userBConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userBId);
+                var allConnections = userAConnections.Concat(userBConnections).Distinct().ToList();
+
+                if (allConnections.Count > 0)
+                {
+                    await _hubContext.Clients.Clients(allConnections).CallEnded(call.Id);
+                }
+            }
+            catch
+            {
+                // SignalR teardown notification is best-effort
+            }
         }
     }
 
     public async Task NotifyConnectionRemovedAsync(Guid userAId, Guid userBId, CancellationToken ct)
     {
-        var userAConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userAId);
-        var userBConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userBId);
+        try
+        {
+            var userAConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userAId);
+            var userBConnections = await _presenceTracker.GetConnectionIdsForUserAsync(userBId);
 
-        if (userAConnections.Count > 0)
-            await _hubContext.Clients.Clients(userAConnections).ConnectionRemoved(userBId);
-        if (userBConnections.Count > 0)
-            await _hubContext.Clients.Clients(userBConnections).ConnectionRemoved(userAId);
+            if (userAConnections.Count > 0)
+                await _hubContext.Clients.Clients(userAConnections).ConnectionRemoved(userBId);
+            if (userBConnections.Count > 0)
+                await _hubContext.Clients.Clients(userBConnections).ConnectionRemoved(userAId);
+        }
+        catch
+        {
+            // SignalR notification is best-effort
+        }
     }
 }

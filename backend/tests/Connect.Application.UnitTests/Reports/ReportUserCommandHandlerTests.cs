@@ -173,8 +173,17 @@ public class ReportUserCommandHandlerTests
             Status = ConnectRequestStatus.Pending
         };
 
+        var thirdPartyUserId = Guid.NewGuid();
+        var thirdPartyRequest = new ConnectRequest
+        {
+            Id = Guid.NewGuid(),
+            FromUserId = _reportedUserId,
+            ToUserId = thirdPartyUserId,
+            Status = ConnectRequestStatus.Pending
+        };
+
         _connectRequestRepoMock.Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ConnectRequest> { request1, request2 });
+            .ReturnsAsync(new List<ConnectRequest> { request1, request2, thirdPartyRequest });
 
         var command = new ReportUserCommand(_reportedUserId, "Harassment", "Sever all ties");
         var result = await _handler.Handle(command, CancellationToken.None);
@@ -184,11 +193,13 @@ public class ReportUserCommandHandlerTests
         // Cascade 1: Connection removed
         _connectionRepoMock.Verify(r => r.Remove(existingConnection), Times.Once);
 
-        // Cascade 2: Requests marked Declined with timestamp
+        // Cascade 2: Requests marked Declined with timestamp (third-party untouched)
         Assert.Equal(ConnectRequestStatus.Declined, request1.Status);
         Assert.Equal(ConnectRequestStatus.Declined, request2.Status);
         Assert.NotNull(request1.RespondedAt);
         Assert.NotNull(request2.RespondedAt);
+        Assert.Equal(ConnectRequestStatus.Pending, thirdPartyRequest.Status);
+        Assert.Null(thirdPartyRequest.RespondedAt);
 
         // Cascade 3: Report persisted
         _reportRepoMock.Verify(r => r.Add(It.Is<Report>(rep =>
