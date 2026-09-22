@@ -3,6 +3,14 @@
 **Last Updated:** September 6, 2026
 **Branch:** `main` (sprint-7.6 work merged in, commit `4b952c6`, plus follow-up fixes through `f5e9d6f`)
 
+> [!NOTE]
+> **Current requirements and architecture now live in BMAD artifacts, not this file:**
+> - Product requirements: `_bmad-output/planning-artifacts/prd.md`
+> - Technical architecture: `_bmad-output/planning-artifacts/technical-architecture.md`
+> - Sprint backlog (STORY-1 through STORY-7): see `technical-architecture.md` and BMAD story files under `_bmad-output/`
+>
+> This file remains the living operational status board (git commits, live QA queue, infra tickets) — it is not the source of truth for product/architecture decisions.
+
 ## 1. Current Architecture / Platform
 - **Frontend:** Flutter Web
 - **Backend:** ASP.NET Core Web API
@@ -18,7 +26,7 @@
 The following features are actually implemented and present in the current repository:
 - **Authentication:** Registration, Login, JWT authentication, Refresh token flow
 - **Directory:** User ID availability and search
-- **Connections:** Connection requests (send, accept, decline), Connected-user list
+- **Connections:** Connection requests (send, accept, decline), Connected-user list, Disconnect (`DELETE /api/v1/connections/{userId}` — verified, passes test flow C5)
 - **Calling:** SignalR signaling, 15-second ringing timeout, Caller/callee hangup, Two-way audio (WebRTC), Cross-network calling (TURN), Call teardown hardening
 - **History:** Call history
 - **Presence:** Realtime presence, Presence visibility/privacy (Everyone, Connections Only, Nobody, Custom)
@@ -53,17 +61,22 @@ The following features are actually implemented and present in the current repos
 - Provider subject IDs should be treated as stable identity identifiers.
 - Logout and refresh token handling should remain consistent with the normal Connect authentication model.
 
+*(Full rules and future schema also captured in `_bmad-output/planning-artifacts/addendum.md`.)*
+
 ## 4. Current Blockers / Open Issues (Priority Queue)
-1. **C5** — Disconnect existing connection (Feature gap)
-2. **S3** — Clear search results when search query becomes empty
-3. **Continue manual QA** using CONNECT_TEST_FLOWS.md, starting with the next unexecuted test
-4. **Presence visibility manual tests** P1–P6
-5. **W4** call exit/teardown live regression
-6. **TEST-002** concurrency testing
-7. **R2** duplicate-report product decision
-8. **Production cleanup / deployment hardening** (e.g., Azure SQL credential rotation, Azure NSG SSH cleanup)
-9. **Batch 3 remediation** (SEC-002/006/007, RT-001/007/008/009, API-*, DOM-002/004, CODE-*)
-10. **Sprint 8** Web MVP release (Unblocked pending C5 and manual QA)
+
+~~1. **C5** — Disconnect existing connection (Feature gap)~~ — **RESOLVED**, verified built and passing.
+~~2. **S3** — Clear search results when search query becomes empty~~ — **RESOLVED as sprint story**, see STORY-7 in `technical-architecture.md`.
+~~3. **R2** — duplicate-report product decision~~ — **RESOLVED**, decision made and specified as STORY-6 in `technical-architecture.md`.
+
+1. **Continue manual QA** using CONNECT_TEST_FLOWS.md, starting with the next unexecuted test
+2. **Presence visibility manual tests** P1–P6
+3. **W4** call exit/teardown live regression
+4. **TEST-002** concurrency testing
+5. **Production cleanup / deployment hardening** (e.g., Azure SQL credential rotation, Azure NSG SSH cleanup)
+6. **Batch 3 remediation** (SEC-002/006/007, RT-001/007/008/009, API-*, DOM-002/004, CODE-*)
+7. **Sprint 9 (post-MVP hardening)** — STORY-1 through STORY-7 sharded into formal story files under `_bmad-output/implementation-artifacts/`, tracked in `sprint-status.yaml` across Batch A, Batch B, and Batch C; ready for dev via `bmad-build`
+8. **Sprint 8** Web MVP release (Unblocked pending items above)
 
 ## 5. Recent Fixes (Sprint 7.6 & Remediation)
 - **WebRTC:** coturn `lt-cred-mech` and `use-auth-secret` conflict resolved.
